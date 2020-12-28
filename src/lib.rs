@@ -4,8 +4,11 @@
 #[macro_use]
 extern crate log;
 
+pub use self::guard::StackGuard;
 pub use self::state::State;
 
 mod alloc;
 mod ffi;
+mod guard;
+pub mod ser;
 mod state;
