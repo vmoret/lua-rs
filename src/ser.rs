@@ -9,14 +9,14 @@ pub struct Error {
     msg: String,
 }
 
-pub struct TableSerializer {
-    state: State,
+pub struct TableSerializer<'a> {
+    state: &'a mut State,
     tref: i32,
     i: i64,
 }
 
-pub struct TableVariantSerializer {
-    state: State,
+pub struct TableVariantSerializer<'a> {
+    state: &'a mut State,
     tref: i32,
     kref: i32,
     i: i64,
@@ -32,17 +32,17 @@ macro_rules! check_stack {
     };
 }
 
-impl ser::Serializer for State {
+impl<'a> ser::Serializer for &'a mut State {
     type Ok = i32;
     type Error = Error;
 
-    type SerializeSeq = TableSerializer;
-    type SerializeTuple = TableSerializer;
-    type SerializeTupleStruct = TableSerializer;
-    type SerializeTupleVariant = TableVariantSerializer;
-    type SerializeMap = TableSerializer;
-    type SerializeStruct = TableSerializer;
-    type SerializeStructVariant = TableVariantSerializer;
+    type SerializeSeq = TableSerializer<'a>;
+    type SerializeTuple = TableSerializer<'a>;
+    type SerializeTupleStruct = TableSerializer<'a>;
+    type SerializeTupleVariant = TableVariantSerializer<'a>;
+    type SerializeMap = TableSerializer<'a>;
+    type SerializeStruct = TableSerializer<'a>;
+    type SerializeStructVariant = TableVariantSerializer<'a>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         // ensure stack has space for 1 value
@@ -189,7 +189,7 @@ impl ser::Serializer for State {
             ffi::lua_createtable(self.as_ptr(), 0, 1);
 
             // serialize the value and push it on the stack
-            let i = value.serialize(self.clone())?;
+            let i = value.serialize(&mut *self)?;
             debug_assert_eq!(1, i, "expected that a serialized value takes 1 stack slot");
 
             // push the value into the table with the variant as key
@@ -218,7 +218,7 @@ impl ser::Serializer for State {
         };
 
         Ok(TableSerializer {
-            state: self.clone(),
+            state: self,
             tref,
             i: 1, // Lua arrays start at index 1.
         })
@@ -268,7 +268,7 @@ impl ser::Serializer for State {
         };
 
         Ok(TableVariantSerializer {
-            state: self.clone(),
+            state: self,
             tref,
             kref,
             i: 1, // Lua arrays start at index 1.
@@ -294,7 +294,7 @@ impl ser::Serializer for State {
         };
 
         Ok(TableSerializer {
-            state: self.clone(),
+            state: self,
             tref,
             i: ffi::LUA_REFNIL.into(), // we're using this to hold the key references
         })
@@ -340,7 +340,7 @@ impl ser::Serializer for State {
         };
 
         Ok(TableVariantSerializer {
-            state: self.clone(),
+            state: self,
             tref,
             kref,
             i: 1, // Lua arrays start at index 1.
@@ -348,7 +348,7 @@ impl ser::Serializer for State {
     }
 }
 
-impl ser::SerializeSeq for TableSerializer {
+impl<'a> ser::SerializeSeq for TableSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -366,7 +366,7 @@ impl ser::SerializeSeq for TableSerializer {
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(self.state.clone())?;
+            let n = value.serialize(&mut *self.state)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops the value from the stack
@@ -397,7 +397,7 @@ impl ser::SerializeSeq for TableSerializer {
     }
 }
 
-impl ser::SerializeTuple for TableSerializer {
+impl<'a> ser::SerializeTuple for TableSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -413,7 +413,7 @@ impl ser::SerializeTuple for TableSerializer {
     }
 }
 
-impl ser::SerializeTupleStruct for TableSerializer {
+impl<'a> ser::SerializeTupleStruct for TableSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -429,7 +429,7 @@ impl ser::SerializeTupleStruct for TableSerializer {
     }
 }
 
-impl ser::SerializeTupleVariant for TableVariantSerializer {
+impl<'a> ser::SerializeTupleVariant for TableVariantSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -447,7 +447,7 @@ impl ser::SerializeTupleVariant for TableVariantSerializer {
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(self.state.clone())?;
+            let n = value.serialize(&mut *self.state)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops the value from the stack
@@ -494,7 +494,7 @@ impl ser::SerializeTupleVariant for TableVariantSerializer {
     }
 }
 
-impl ser::SerializeMap for TableSerializer {
+impl<'a> ser::SerializeMap for TableSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -507,7 +507,7 @@ impl ser::SerializeMap for TableSerializer {
         check_stack!(self.state, 1)?;
 
         // serialie the key, pushing it onto the stack
-        let n = key.serialize(self.state.clone())?;
+        let n = key.serialize(&mut *self.state)?;
         debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
         self.i = unsafe {
@@ -543,7 +543,7 @@ impl ser::SerializeMap for TableSerializer {
             ffi::luaL_unref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, i32::try_from(self.i).unwrap());
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(self.state.clone())?;
+            let n = value.serialize(&mut *self.state)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops both the key and the value 
@@ -574,7 +574,7 @@ impl ser::SerializeMap for TableSerializer {
     }
 }
 
-impl ser::SerializeStruct for TableSerializer {
+impl<'a> ser::SerializeStruct for TableSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -595,7 +595,7 @@ impl ser::SerializeStruct for TableSerializer {
     }
 }
 
-impl ser::SerializeStructVariant for TableVariantSerializer {
+impl<'a> ser::SerializeStructVariant for TableVariantSerializer<'a> {
     type Ok = i32;
     type Error = Error;
 
@@ -617,11 +617,11 @@ impl ser::SerializeStructVariant for TableVariantSerializer {
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // serialie the key, pushing it onto the stack
-            let n = key.serialize(self.state.clone())?;
+            let n = key.serialize(&mut *self.state)?;
             debug_assert_eq!(n, 1, "expected key to be serialized in one slot");
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(self.state.clone())?;
+            let n = value.serialize(&mut *self.state)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops both the key and the value 

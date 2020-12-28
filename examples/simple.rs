@@ -29,7 +29,9 @@ enum Gender {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let state = lua::State::new();
+    env_logger::init();
+
+    let mut state = lua::State::new();
 
     let config = Config {
         employees: vec![
@@ -50,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
 
-    let ret = config.serialize(state.clone())?;
+    let ret = config.serialize(&mut state)?;
     println!("ret = {}", ret);
     println!("stack size = {}", state.get_top());
     
