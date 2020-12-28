@@ -99,6 +99,35 @@ impl State {
     pub fn as_ptr(&self) -> *mut ffi::lua_State {
         self.inner().ptr.as_ptr()
     }
+
+    /// Ensures that the stack has space for at least `n` extra elements, that is, that you can
+    /// safely push up to `n` values into it. It returns `false` if it cannot fulfill the request,
+    /// either because it would cause the stack to be greater than a fixed maximum size (typically
+    /// at least several thousand elements) or because it cannot allocate memory for the extra space.
+    /// 
+    /// This function never shrinks the stack; if the stack already has space for the extra elements,
+    /// it is left unchanged.
+    pub fn check_stack(&self, n: i32) -> bool {
+        unsafe { ffi::lua_checkstack(self.as_ptr(), n) != 0 }
+    }
+
+    /// Returns the index of the top element in the stack.
+    /// 
+    /// Because indices start at 1, this result is equal to the number of elements in the stack; in 
+    /// particular, 0 means an empty stack.
+    pub fn get_top(&self) -> i32 {
+        unsafe { ffi::lua_gettop(self.as_ptr()) }
+    }
+
+    /// Accepts any `index`, or 0, and sets the stack top to this `index`. If the new top is greater
+    /// than the old one, then the new elements are filled with **nil**. If `index` is 0, then all
+    /// stack elements are removed.
+    /// 
+    /// This function can run arbitrary code when removing an index marked as to-be-closed from the
+    /// stack.
+    pub fn set_top(&self, index: i32) {
+        unsafe { ffi::lua_settop(self.as_ptr(), index) }
+    }
 }
 
 /// Creates a new `NonNull<ffi::lua_State>` with the given memory allocation `limit`.
