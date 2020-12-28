@@ -591,7 +591,7 @@ impl ser::SerializeStruct for TableSerializer {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        todo!()
+        ser::SerializeMap::end(self)
     }
 }
 
