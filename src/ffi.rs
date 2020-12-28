@@ -144,7 +144,7 @@ extern "C" {
     pub fn lua_toclose(state: *mut lua_State, index: c_int);
 
     pub fn lua_gettop(state: *const lua_State) -> c_int;
-    pub fn lua_settop(state: *mut lua_State, n: c_int);
+    pub fn lua_settop(state: *mut lua_State, index: c_int);
     pub fn lua_checkstack(state: *mut lua_State, n: c_int) -> c_int;
     pub fn lua_rotate(state: *mut lua_State, index: c_int, n: c_int);
     pub fn lua_copy(state: *mut lua_State, from: c_int, to: c_int);
