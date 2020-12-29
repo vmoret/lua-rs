@@ -4,42 +4,48 @@ use serde::{Deserialize, Serialize};
 
 use crate::{alloc, de, ffi, ser};
 
+pub use types::*;
+
 /// A soft limit on the amount of references that may be made to a `State`.
 ///
 /// Going above this limit will abort your program (although not
 /// necessarily) at _exactly_ `MAX_REFCOUNT + 1` references.
 const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
-/// The type returned by [`State::value_type`] when a non-valid but acceptable index was provided.
-pub const LUA_TNONE: i32 = ffi::LUA_TNONE;
+pub mod types {
+    use super::ffi;
 
-/// The **nil** value type.
-pub const LUA_TNIL: i32 = ffi::LUA_TNIL;
+    /// The type returned by [`State::value_type`](super::State::value_type) when a non-valid but 
+    /// acceptable index was provided.
+    pub const LUA_TNONE: i32 = ffi::LUA_TNONE;
 
-/// The *number* value type.
-pub const LUA_TNUMBER: i32 = ffi::LUA_TNUMBER;
+    /// The **nil** value type.
+    pub const LUA_TNIL: i32 = ffi::LUA_TNIL;
 
-/// The *boolean* value type.
-pub const LUA_TBOOLEAN: i32 = ffi::LUA_TBOOLEAN;
+    /// The *number* value type.
+    pub const LUA_TNUMBER: i32 = ffi::LUA_TNUMBER;
 
-/// The *string* value type.
-pub const LUA_TSTRING: i32 = ffi::LUA_TSTRING;
+    /// The *boolean* value type.
+    pub const LUA_TBOOLEAN: i32 = ffi::LUA_TBOOLEAN;
 
-/// The *table* value type.
-pub const LUA_TTABLE: i32 = ffi::LUA_TTABLE;
+    /// The *string* value type.
+    pub const LUA_TSTRING: i32 = ffi::LUA_TSTRING;
 
-/// The *function* value type.
-pub const LUA_TFUNCTION: i32 = ffi::LUA_TFUNCTION;
+    /// The *table* value type.
+    pub const LUA_TTABLE: i32 = ffi::LUA_TTABLE;
 
-/// The *user data* value type.
-pub const LUA_TUSERDATA: i32 = ffi::LUA_TUSERDATA;
+    /// The *function* value type.
+    pub const LUA_TFUNCTION: i32 = ffi::LUA_TFUNCTION;
 
-/// The *thread* value type.
-pub const LUA_TTHREAD: i32 = ffi::LUA_TTHREAD;
+    /// The *user data* value type.
+    pub const LUA_TUSERDATA: i32 = ffi::LUA_TUSERDATA;
 
-/// The *light user data* value type.
-pub const LUA_TLIGHTUSERDATA: i32 = ffi::LUA_TLIGHTUSERDATA;
+    /// The *thread* value type.
+    pub const LUA_TTHREAD: i32 = ffi::LUA_TTHREAD;
 
+    /// The *light user data* value type.
+    pub const LUA_TLIGHTUSERDATA: i32 = ffi::LUA_TLIGHTUSERDATA;
+}
 // This is repr(C) to future-proof against possible field-reordering.
 #[repr(C)]
 struct StateBox {
