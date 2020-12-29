@@ -1,6 +1,8 @@
 //! Lua state.
-use std::{cell::Cell, fmt, ptr::NonNull};
-use crate::{alloc, ffi};
+use std::{cell::Cell, io, fmt, ptr::NonNull};
+use serde::Deserialize;
+
+use crate::{alloc, de, ffi};
 
 /// A soft limit on the amount of references that may be made to a `State`.
 ///
@@ -166,6 +168,19 @@ impl State {
     pub fn value_type(&self, index: i32) -> i32 {
         unsafe { ffi::lua_type(self.as_ptr(), index) }
     }
+
+    /// Pops and returns the element on the top of the stack.
+    /// 
+    /// This function can run arbitrary code when removing an index marked as to-be-closed from the
+    /// stack.
+    pub fn pop<'de, T>(&'de self) -> Result<T, de::Error>
+    where
+        T: Deserialize<'de>,
+    {
+        let t = self.deserialize();
+        unsafe { ffi::lua_pop(self.as_ptr(), 1) };
+        t
+    }
 }
 
 /// Creates a new `NonNull<ffi::lua_State>` with the given memory allocation `limit`.
@@ -223,5 +238,47 @@ impl Drop for State {
 impl AsRef<State> for State {
     fn as_ref(&self) -> &State {
         self
+    }
+}
+
+/// Lua chunk mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Mode {
+    /// Text only chunk.
+    Text,
+    /// Binary only chunk.
+    Binary,
+    /// Undefined chunk, can be binary or text.
+    Undefined,
+}
+
+impl From<Mode> for &str {
+    fn from(mode: Mode) -> Self {
+        match mode {
+            Mode::Text => "t",
+            Mode::Binary => "b",
+            Mode::Undefined => "bt",
+        }
+    }
+}
+
+impl State {
+    /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
+    /// compiled chunk as a Lua function on top of the stack. Otherwise, it returns an error message.
+    pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
+        let mut buf = Vec::with_capacity(4 * 1_024);
+        let len = reader.read_to_end(&mut buf)?;
+
+        let mode: &str = mode.into();
+        let code = unsafe { ffi::luaL_loadbufferx(self.as_ptr(), buf.as_ptr() as _, buf.len(), name.as_ptr() as _, mode.as_ptr() as _) };
+
+        if code == ffi::LUA_OK {
+            Ok(len)
+        } else {
+            let error: &str = self.pop().map_err(|error| {
+                io::Error::new(io::ErrorKind::InvalidData, error)
+            })?;
+            Err(io::Error::new(io::ErrorKind::InvalidData, error))
+        }
     }
 }

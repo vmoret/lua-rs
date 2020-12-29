@@ -3,6 +3,8 @@ extern crate lua;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 
+use std::fs::File;
+
 use serde::Serialize;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,7 +60,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let c: Config = state.deserialize()?;
     println!("config = {:?}", c);
-    println!("equals? = {}", c == config);
+    println!("stack size = {}", state.get_top());
     
+    let mut file = File::open("examples/simple.lua")?;
+    state.load_buffer(&mut file, "simple", lua::Mode::Text)?;
+    println!("stack size = {}", state.get_top());
+
     Ok(())
 }
