@@ -11,7 +11,6 @@ use crate::{alloc, de, ffi, ser};
 const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
 /// The type returned by [`State::value_type`] when a non-valid but acceptable index was provided.
-#[allow(dead_code)]
 pub const LUA_TNONE: i32 = ffi::LUA_TNONE;
 
 /// The **nil** value type.
@@ -300,11 +299,14 @@ impl State {
     }
 }
 
+/// A mutable access to the Lua global variables.
+#[derive(Debug, Clone)]
 pub struct GlobalsMut {
     state: State,
 }
 
 impl GlobalsMut {
+    /// Serializes the `value` and sets it as the new value of the global `name`.
     pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<(), ser::Error>
     where
         T: Serialize + fmt::Debug,
@@ -313,9 +315,8 @@ impl GlobalsMut {
 
         value.serialize(&mut self.state)?;
 
-        unsafe {
-            ffi::lua_setglobal(self.state.as_ptr(), name.as_ptr() as _);
-        }
+        // pops a value from the stack and set it as the new value of global name
+        unsafe { ffi::lua_setglobal(self.state.as_ptr(), name.as_ptr() as _) };
 
         Ok(())
     }
@@ -350,6 +351,18 @@ impl From<GlobalsMut> for State {
     }
 }
 
+/// An immutable access to the Lua global variables.
+///
+/// # Examples
+///
+/// ```
+/// # extern crate lua;
+/// use lua::State;
+///
+/// let lua = State::default();
+/// let g = lua.as_globals();
+/// ```
+#[derive(Debug)]
 pub struct Globals {
     state: State,
 }
@@ -362,6 +375,7 @@ impl Globals {
         unsafe { &*(state.as_ref() as *const State as *const Globals) }
     }
 
+    /// Returns the deserialized value of the global `name`.
     pub fn get<'de, T>(&'de self, name: &str) -> Result<T, de::Error>
     where
         T: Deserialize<'de>,
@@ -380,12 +394,16 @@ impl Globals {
     }
 }
 
+impl ToOwned for Globals {
+    type Owned = GlobalsMut;
+    fn to_owned(&self) -> Self::Owned {
+        GlobalsMut { state: self.state.clone() }
+    }
+}
+
 impl State {
+    /// Returns a reference to the Lua globals.
     pub fn as_globals(&self) -> &Globals {
         Globals::new(self)
-    }
-
-    pub fn into_globals(self) -> GlobalsMut {
-        GlobalsMut::from(self)
     }
 }
