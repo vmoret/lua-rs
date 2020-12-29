@@ -5,24 +5,24 @@ extern crate serde;
 
 use serde::Serialize;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Config {
     employees: Vec<Employee>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Employee {
     id: i32,
     info: PersonInfo,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct PersonInfo {
     age: u8,
     gender: Gender,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 enum Gender {
     Male,
     Female,
@@ -55,6 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ret = config.serialize(&mut state)?;
     println!("ret = {}", ret);
     println!("stack size = {}", state.get_top());
+
+    let c: Config = state.deserialize()?;
+    println!("config = {:?}", c);
+    println!("equals? = {}", c == config);
     
     Ok(())
 }

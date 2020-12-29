@@ -8,6 +8,37 @@ use crate::{alloc, ffi};
 /// necessarily) at _exactly_ `MAX_REFCOUNT + 1` references.
 const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
+/// The type returned by [`State::value_type`] when a non-valid but acceptable index was provided.
+#[allow(dead_code)]
+pub const LUA_TNONE: i32 = ffi::LUA_TNONE;
+
+/// The **nil** value type.
+pub const LUA_TNIL: i32 = ffi::LUA_TNIL;
+
+/// The *number* value type.
+pub const LUA_TNUMBER: i32 = ffi::LUA_TNUMBER;
+
+/// The *boolean* value type.
+pub const LUA_TBOOLEAN: i32 = ffi::LUA_TBOOLEAN;
+
+/// The *string* value type.
+pub const LUA_TSTRING: i32 = ffi::LUA_TSTRING;
+
+/// The *table* value type.
+pub const LUA_TTABLE: i32 = ffi::LUA_TTABLE;
+
+/// The *function* value type.
+pub const LUA_TFUNCTION: i32 = ffi::LUA_TFUNCTION;
+
+/// The *user data* value type.
+pub const LUA_TUSERDATA: i32 = ffi::LUA_TUSERDATA;
+
+/// The *thread* value type.
+pub const LUA_TTHREAD: i32 = ffi::LUA_TTHREAD;
+
+/// The *light user data* value type.
+pub const LUA_TLIGHTUSERDATA: i32 = ffi::LUA_TLIGHTUSERDATA;
+
 // This is repr(C) to future-proof against possible field-reordering.
 #[repr(C)]
 struct StateBox {
@@ -126,7 +157,14 @@ impl State {
     /// This function can run arbitrary code when removing an index marked as to-be-closed from the
     /// stack.
     pub fn set_top(&self, index: i32) {
+        trace!("set_top() index = {}", index);
         unsafe { ffi::lua_settop(self.as_ptr(), index) }
+    }
+
+    /// Returns the type of the value in the given valid `index`, or [`LUA_TNONE`] for a non-valid
+    /// but acceptable index.
+    pub fn value_type(&self, index: i32) -> i32 {
+        unsafe { ffi::lua_type(self.as_ptr(), index) }
     }
 }
 

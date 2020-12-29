@@ -8,7 +8,9 @@ pub use self::guard::StackGuard;
 pub use self::state::State;
 
 mod alloc;
+pub mod de;
 mod ffi;
 mod guard;
+mod lref;
 pub mod ser;
 mod state;
