@@ -818,7 +818,8 @@ pub struct Error {
 }
 
 impl Error {
-    fn new<T: fmt::Display>(msg: T) -> Self {
+    /// Creates a new `Error` with a given error message `msg`.
+    pub fn new<T: fmt::Display>(msg: T) -> Self {
         Error {
             msg: msg.to_string(),
         }

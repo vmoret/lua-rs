@@ -1,8 +1,8 @@
 //! Lua state.
-use std::{cell::Cell, io, fmt, ptr::NonNull};
-use serde::Deserialize;
+use std::{borrow::Borrow, cell::Cell, fmt, ffi::CString, io, ops::Deref, ptr::NonNull};
+use serde::{Deserialize, Serialize};
 
-use crate::{alloc, de, ffi};
+use crate::{alloc, de, ffi, ser};
 
 /// A soft limit on the amount of references that may be made to a `State`.
 ///
@@ -280,5 +280,108 @@ impl State {
             })?;
             Err(io::Error::new(io::ErrorKind::InvalidData, error))
         }
+    }
+
+    pub fn call(&mut self, nargs: i32, nresults: i32, msgh: i32) -> io::Result<()> {
+        let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
+
+        if code == ffi::LUA_OK {
+            Ok(())
+        } else {
+            let error: &str = self.pop().map_err(|error| {
+                io::Error::new(io::ErrorKind::InvalidData, error)
+            })?;
+            Err(io::Error::new(io::ErrorKind::InvalidData, error))
+        }
+    }
+}
+
+pub struct GlobalsMut {
+    state: State,
+}
+
+impl GlobalsMut {
+    pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<(), ser::Error>
+    where
+        T: Serialize + fmt::Debug,
+    {
+        trace!("Globals::set() name = {:?}, value = {:?}", name, value);
+
+        value.serialize(&mut self.state)?;
+
+        unsafe {
+            ffi::lua_setglobal(self.state.as_ptr(), name.as_ptr() as _);
+        }
+
+        Ok(())
+    }
+}
+
+impl Deref for GlobalsMut {
+    type Target = Globals;
+    fn deref(&self) -> &Self::Target {
+        Globals::new(&self.state)
+    }
+}
+
+impl From<State> for GlobalsMut {
+    /// Converts a `State` into a `GlobalsMut`
+    ///
+    /// This conversion does not allocate or copy memory.
+    #[inline]
+    fn from(state: State) -> Self {
+        Self { state }
+    }
+}
+
+impl Borrow<Globals> for GlobalsMut {
+    fn borrow(&self) -> &Globals {
+        self.deref()
+    }
+}
+
+impl From<GlobalsMut> for State {
+    fn from(this: GlobalsMut) -> State {
+        this.state
+    }
+}
+
+pub struct Globals {
+    state: State,
+}
+
+impl Globals {
+    /// Directly wraps a [`State`] as a `Globals` reference.
+    /// 
+    /// This is a cost-free conversion.
+    pub fn new<S: AsRef<State>>(state: &S) -> &Globals {
+        unsafe { &*(state.as_ref() as *const State as *const Globals) }
+    }
+
+    pub fn get<'de, T>(&'de self, name: &str) -> Result<T, de::Error>
+    where
+        T: Deserialize<'de>,
+    {
+        trace!("Globals::get() name = {:?}", name);
+
+        unsafe {
+            let name = CString::new(name).map_err(|error| {
+                de::Error::new(error.to_string())
+            })?;
+            let typ = ffi::lua_getglobal(self.state.as_ptr(), name.as_ptr());
+            debug!("Globals::get() name = {:?}: type = {}", name, typ);
+        }
+
+        self.state.pop()
+    }
+}
+
+impl State {
+    pub fn as_globals(&self) -> &Globals {
+        Globals::new(self)
+    }
+
+    pub fn into_globals(self) -> GlobalsMut {
+        GlobalsMut::from(self)
     }
 }

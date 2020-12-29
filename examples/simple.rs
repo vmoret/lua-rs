@@ -65,6 +65,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::open("examples/simple.lua")?;
     state.load_buffer(&mut file, "simple", lua::Mode::Text)?;
     println!("stack size = {}", state.get_top());
+    
+    state.call(0, 0, 0)?;
+    println!("stack size = {}", state.get_top());
+    
+    let globals = state.as_globals();
+    let width: u16 = globals.get("width")?;
+    println!("width = {}", width);
+    println!("stack size = {}", state.get_top());
+
+    let height: u16 = globals.get("height")?;
+    println!("height = {}", height);
+    println!("stack size = {}", state.get_top());
 
     Ok(())
 }
