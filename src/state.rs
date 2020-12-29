@@ -266,6 +266,8 @@ impl State {
     /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
     /// compiled chunk as a Lua function on top of the stack. Otherwise, it returns an error message.
     pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
+        trace!("State::load_buffer() name = {:?}, mode = {:?}", name, mode);
+
         let mut buf = Vec::with_capacity(4 * 1_024);
         let len = reader.read_to_end(&mut buf)?;
 
@@ -283,6 +285,8 @@ impl State {
     }
 
     pub fn call(&mut self, nargs: i32, nresults: i32, msgh: i32) -> io::Result<()> {
+        trace!("State::call() nargs = {}, nresults = {}, msgh = {}", nargs, nresults, msgh);
+
         let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
 
         if code == ffi::LUA_OK {
