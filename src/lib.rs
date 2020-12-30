@@ -10,11 +10,11 @@ pub use self::state::{State, types};
 pub use self::stack::{Globals, GlobalsMut, Stack, Mode};
 
 mod alloc;
-pub mod de;
+mod de;
 mod error;
 mod ffi;
 // mod guard;
 mod lref;
-pub mod ser;
+mod ser;
 mod stack;
 mod state;
