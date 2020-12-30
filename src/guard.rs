@@ -24,9 +24,10 @@ impl Drop for StackGuard {
         let top = self.as_stack().top();
         if top > self.top {
             // remove the items above the high-water mark.
-            self.set_top(self.top);
+            unsafe { crate::ffi::lua_settop(self.state.as_ptr(), self.top) };
         } else if top < self.top {
-            // 
+            // abort here as it's considered a programming error to have less
+            // elements on the stack while using this guard.
             std::process::abort();
         }
     }
