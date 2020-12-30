@@ -124,15 +124,23 @@ pub struct Stack {
     state: State,
 }
 
-/// Lua chunk mode.
+/// A list specifying Lua chunk modes.
+/// 
+/// A mode controls whether the chunk can be text or binary (that is, a precompiled chunk).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Mode {
     /// Text only chunk.
     Text,
     /// Binary only chunk.
     Binary,
-    /// Undefined chunk, can be binary or text.
+    /// Undefined chunk mode, the chunk can be both binary and text.
     Undefined,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::Undefined
+    }
 }
 
 impl From<Mode> for &str {

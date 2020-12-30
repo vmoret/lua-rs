@@ -92,7 +92,7 @@ impl Drop for StateBox {
     }
 }
 
-/// The Lua state.
+/// A Lua state.
 ///
 /// This is a single-threaded reference-counting pointer for a C `lua_State` structure, ensuring
 /// that the Lua state is closed when, and only when, all references are dropped.

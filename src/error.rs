@@ -3,8 +3,11 @@ use std::fmt;
 /// A specialized [`Result`](std::result::Result) type for Lua operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The error type for Lua operations of the [`Push`], Pull, Pop, and associated
+/// The error type for Lua operations of the [`Push`], [`Pull`], Pop, and associated
 /// traits.
+///
+/// [`Push`]: ../stack/trait.Push.html
+/// [`Pull`]: ../stack/trait.Pull.html
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Error {
     /// A custom error.
