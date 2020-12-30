@@ -6,7 +6,7 @@ extern crate log;
 
 // pub use self::guard::StackGuard;
 pub use self::error::{Error, Result};
-pub use self::stack::{Globals, GlobalsMut, Mode, Push, Stack};
+pub use self::stack::{Globals, GlobalsMut, Mode, Pull, Push, Stack};
 pub use self::state::{types, State};
 
 mod alloc;

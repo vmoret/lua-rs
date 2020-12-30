@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 
 use super::{ffi, state::State, de::Deserializer, error::{Error, Result}};
 
-/// A type that can be pushed onto a Lua stack.
+/// A type that can be [`push`]ed onto a Lua stack.
 ///
 /// Out of the box this crate provides `Push` implementations for all types that
 /// implement [`Serialize`].
@@ -23,6 +23,8 @@ use super::{ffi, state::State, de::Deserializer, error::{Error, Result}};
 /// # Ok(())
 /// # }
 /// ```
+///
+/// [`push`]: Stack::push
 pub trait Push {
     /// Pushes this value onto the given stack and returns the number of slots
     /// used (typically that will be 1).
@@ -33,6 +35,40 @@ pub trait Push {
 impl<T: Serialize> Push for T {
     fn push(&self, stack: &mut Stack) -> Result<i32> {
         self.serialize(stack)
+    }
+}
+
+/// A type that can be [`pull`]ed from a Lua stack.
+///
+/// Out of the box this crate provides `Pull` implementations for all types that
+/// implement [`Deserialize`].
+///
+/// # Examples
+///
+/// ```
+/// # extern crate lua;
+/// use lua::Stack;
+/// use crate::lua::{Push, Pull};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut stack = Stack::new();
+/// 1989_i32.push(&mut stack)?;
+/// assert_eq!(1989, i32::pull(&stack, -1)?);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [`pull`]: Stack::pull
+pub trait Pull<'lua>: Sized {
+    /// Pulls and returns the value at specified index from the Lua [`Stack`].
+    fn pull(stack: &'lua Stack, index: i32) -> Result<Self>;
+}
+
+impl<'lua, T: Deserialize<'lua>> Pull<'lua> for T {
+    fn pull(stack: &'lua Stack, index: i32) -> Result<Self> {
+        assert_eq!(index, -1, "only support pulling from the top of the stack");
+        let mut deserializer = Deserializer::new(stack);
+        T::deserialize(&mut deserializer)
     }
 }
 
@@ -369,16 +405,46 @@ impl Stack {
         unsafe { ffi::lua_type(self.as_ptr(), index) }
     }
 
-    /// Returns the element on the top of the stack.
+    /// Pulls and returns the value at specified index from the Lua [`Stack`].
     ///
-    /// This method requires `T` to implement [`Deserialize`], in order to be able to desserialize
-    /// the element.
+    /// This method requires `T` to implement [`Pull`], in order to be able to pull the element.
     ///
     /// # Examples
     ///
     /// ```
     /// # extern crate lua;
     /// use lua::Stack;
+    /// use lua::{Push, Pull};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1, 2, 3, 4])?;
+    /// assert_eq!(4, stack.len());
+    /// let v: i32 = stack.pull(-1)?;
+    /// assert_eq!(4, v);
+    /// assert_eq!(4, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pull<'a, T>(&'a self, index: i32) -> Result<T>
+    where
+        T: Pull<'a>,
+    {
+        T::pull(self, index)
+    }
+
+    /// Returns the element on the top of the stack.
+    ///
+    /// This method requires `T` to implement [`Pull`], in order to be able to pull the element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    /// use lua::{Push, Pull};
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut stack = Stack::new();
@@ -394,10 +460,9 @@ impl Stack {
     /// ```
     pub fn get<'de, T>(&'de self) -> Result<T>
     where
-        T: Deserialize<'de>,
+        T: Pull<'de>,
     {
-        let mut deserializer = Deserializer::new(self);
-        T::deserialize(&mut deserializer)
+        self.pull(-1)
     }
 
     /// Pops and returns the element on the top of the stack.
@@ -429,7 +494,7 @@ impl Stack {
     // TODO(vimo) make this mutable when Globals is merged with GlobalsMut.
     pub fn pop<'de, T>(&'de self) -> Result<T>
     where
-        T: Deserialize<'de>,
+        T: Pull<'de>,
     {
         let t = self.get();
         unsafe { ffi::lua_pop(self.as_ptr(), 1) };
