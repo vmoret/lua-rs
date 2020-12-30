@@ -1,13 +1,9 @@
 //! Lua serialization.
-use std::{convert::TryFrom, fmt};
+use std::{convert::TryFrom};
 
 use serde::{ser, Serialize};
 
-use crate::{ffi, Stack};
-
-pub struct Error {
-    msg: String,
-}
+use crate::{ffi, Stack, error::Error};
 
 pub struct TableSerializer<'a> {
     stack: &'a mut Stack,
@@ -27,7 +23,7 @@ macro_rules! check_stack {
         if $stack.reserve($n) {
             Ok(())
         } else {
-            Err(Error { msg: "".into() })
+            Err(Error::StackOverflow)
         }
     };
 }
@@ -91,7 +87,10 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        self.serialize_i64(i64::try_from(v).map_err(|e| Error { msg: e.to_string() })?)
+        self.serialize_i64(i64::try_from(v).map_err(|e| {
+            error!("unable to cast i64 to u64, {}", e);
+            Error::InvalidInteger
+        })?)
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
@@ -206,7 +205,10 @@ impl<'a> ser::Serializer for &'a mut Stack {
         // use the provided len as the hint for the number of array elements, if
         // None is provided use 0 as hint.
         let len = len.unwrap_or(0);
-        let narr = i32::try_from(len).map_err(|e| Error { msg: e.to_string() })?;
+        let narr = i32::try_from(len).map_err(|e| {
+            error!("unable to cast usize to i32, {}", e);
+            Error::InvalidInput { name: "len".into(), error: format!("unable to cast {} to i32, {}", len, e)}
+        })?;
 
         let tref = unsafe {
             // create a table and push it onto the stack
@@ -247,7 +249,10 @@ impl<'a> ser::Serializer for &'a mut Stack {
         check_stack!(self, 1)?;
 
         // use the provided len as the hint for the number of array elements
-        let narr = i32::try_from(len).map_err(|e| Error { msg: e.to_string() })?;
+        let narr = i32::try_from(len).map_err(|e| {
+            error!("unable to cast usize to i32, {}", e);
+            Error::InvalidInput { name: "len".into(), error: format!("unable to cast {} to i32, {}", len, e)}
+        })?;
 
         let tref = unsafe {
             // create a table and push it onto the stack
@@ -282,7 +287,10 @@ impl<'a> ser::Serializer for &'a mut Stack {
         // use the provided len as the hint for the number of record elements, if
         // None is provided use 0 as hint.
         let len = len.unwrap_or(0);
-        let nrec = i32::try_from(len).map_err(|e| Error { msg: e.to_string() })?;
+        let nrec = i32::try_from(len).map_err(|e| {
+            error!("unable to cast usize to i32, {}", e);
+            Error::InvalidInput { name: "len".into(), error: format!("unable to cast {} to i32, {}", len, e)}
+        })?;
 
         let tref = unsafe {
             // create a table and push it onto the stack
@@ -319,7 +327,10 @@ impl<'a> ser::Serializer for &'a mut Stack {
         check_stack!(self, 1)?;
 
         // use the provided len as the hint for the number of record elements.
-        let nrec = i32::try_from(len).map_err(|e| Error { msg: e.to_string() })?;
+        let nrec = i32::try_from(len).map_err(|e| {
+            error!("unable to cast usize to i32, {}", e);
+            Error::InvalidInput { name: "len".into(), error: format!("unable to cast {} to i32, {}", len, e)}
+        })?;
 
         let tref = unsafe {
             // create a table and push it onto the stack
@@ -637,27 +648,5 @@ impl<'a> ser::SerializeStructVariant for TableVariantSerializer<'a> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         ser::SerializeTupleVariant::end(self)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.msg, f)
-    }
-}
-
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self, f)
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl ser::Error for Error {
-    fn custom<T: fmt::Display>(msg: T) -> Self {
-        Self {
-            msg: msg.to_string(),
-        }
     }
 }

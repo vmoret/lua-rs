@@ -1,5 +1,4 @@
 //! Lua deserialization.
-use std::fmt;
 
 use num_traits::{cast::cast, NumCast};
 
@@ -9,6 +8,7 @@ use serde::de::{
 };
 
 use crate::{
+    error::Error,
     ffi,
     state, stack::Stack,
     lref::LRef,
@@ -36,11 +36,11 @@ impl<'de> Deserializer<'de> {
         match self.parse_i64() {
             Some(n) => cast(n).ok_or_else(|| {
                 error!("failed to cast {} from i64", n);
-                Error::new(format!("failed to cast {} from i64", n))
+                Error::InvalidInteger
             }),
             None => {
                 error!("unable to deserialize as integer");
-                Err(Error::new("unable to deserialize as integer"))
+                Err(Error::InvalidInteger)
             },
         }
     }
@@ -59,11 +59,11 @@ impl<'de> Deserializer<'de> {
         match self.parse_f64() {
             Some(n) => cast(n).ok_or_else(|| {
                 error!("failed to cast {} from f64", n);
-                Error::new(format!("failed to cast {} from f64", n))
+                Error::InvalidNumber
             }),
             None => {
                 error!("unable to deserialize as float");
-                Err(Error::new("unable to deserialize as float"))
+                Err(Error::InvalidNumber)
             },
         }
     }
@@ -106,11 +106,11 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             state::LUA_TBOOLEAN => self.deserialize_bool(visitor),
             state::LUA_TFUNCTION => {
                 error!("unable to deserialize functions");
-                Err(Error::new("unable to deserialize functions"))
+                Err(Error::InvalidType(typ))
             },
             state::LUA_TLIGHTUSERDATA => {
                 error!("unable to deserialize light user data");
-                Err(Error::new("unable to deserialize light user data"))
+                Err(Error::InvalidType(typ))
             },
             state::LUA_TNIL => self.deserialize_unit(visitor),
             state::LUA_TNUMBER => unsafe {
@@ -126,15 +126,15 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             }
             state::LUA_TTHREAD => {
                 error!("unable to deserialize threads");
-                Err(Error::new("unable to deserialize threads"))
+                Err(Error::InvalidType(typ))
             },
             state::LUA_TUSERDATA => {
                 error!("unable to deserialize user data");
-                Err(Error::new("unable to deserialize user data"))
+                Err(Error::InvalidType(typ))
             },
             _ => {
                 error!("invalid value type");
-                Err(Error::new("invalid value type"))
+                Err(Error::InvalidType(typ))
             },
         }
     }
@@ -247,14 +247,14 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             .parse_str()
             .ok_or_else(|| {
                 error!("unable to deserialize as char");
-                Error::new("unable to deserialize as char")
+                Error::InvalidString
             })?;
         let chars: Vec<char> = s.chars().collect();
         if chars.len() == 1 {
             visitor.visit_char(chars[0])
         } else {
             error!("unable to deserialize as char");
-            Err(Error::new("unable to deserialize as char"))
+            Err(Error::InvalidString)
         }
     }
 
@@ -267,7 +267,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             .parse_str()
             .ok_or_else(|| {
                 error!("unable to deserialize as str");
-                Error::new("unable to deserialize as str")
+                Error::InvalidString
             })?;
         visitor.visit_borrowed_str(s)
     }
@@ -281,7 +281,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             .parse_str()
             .ok_or_else(|| {
                 error!("unable to deserialize as string");
-                Error::new("unable to deserialize as string")
+                Error::InvalidString
             })?;
         visitor.visit_string(s.to_string())
     }
@@ -295,7 +295,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             .parse_bytes()
             .ok_or_else(|| {
                 error!("unable to deserialize as bytes");
-                Error::new("unable to deserialize as bytes")
+                Error::InvalidString
             })?;
         visitor.visit_borrowed_bytes(v)
     }
@@ -309,7 +309,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             .parse_bytes()
             .ok_or_else(|| {
                 error!("unable to deserialize as bytes");
-                Error::new("unable to deserialize as bytes")
+                Error::InvalidString
             })?;
         visitor.visit_byte_buf(v.to_vec())
     }
@@ -474,7 +474,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                         .parse_str()
                         .ok_or_else(|| {
                             error!("non-string variant in enum");
-                            Error::new("non-string variant in enum")
+                            Error::Custom("non-string variant in enum".into())
                         })?;
                     visitor.visit_enum(s.to_string().into_deserializer())
                 }
@@ -493,9 +493,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
                     ret
                 }
-                _ => {
+                typ => {
                     error!("unsupported enum value");
-                    return Err(Error::new("unsupported enum value"))
+                    return Err(Error::InvalidType(typ))
                 }
             }
         }
@@ -764,7 +764,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     fn unit_variant(self) -> Result<(), Self::Error> {
         trace!("EnumAccessor::unit_variant() top = {}", self.de.stack.top());
         error!("EnumAccessor::unit_variant() expected string");
-        Err(Error::new("expected string"))
+        Err(Error::Custom("expected string".into()))
     }
 
     // Newtype variants are represented in Lua as `{ name = value }` so
@@ -799,39 +799,6 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     {
         trace!("EnumAccessor::struct_variant() top = {}", self.de.stack.top());
         de::Deserializer::deserialize_map(self.de, visitor)
-    }
-}
-
-pub struct Error {
-    msg: String,
-}
-
-impl Error {
-    /// Creates a new `Error` with a given error message `msg`.
-    pub fn new<T: fmt::Display>(msg: T) -> Self {
-        Error {
-            msg: msg.to_string(),
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.msg, f)
-    }
-}
-
-impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self, f)
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl de::Error for Error {
-    fn custom<T: fmt::Display>(msg: T) -> Self {
-        Self::new(msg)
     }
 }
 

@@ -2,7 +2,11 @@ use std::{borrow::Borrow, convert::TryFrom, io, ffi::CString, fmt, ops::Deref};
 
 use serde::{Serialize, Deserialize};
 
-use super::{ffi, state::State, de, ser};
+use super::{ffi, state::State, de::Deserializer, error::{Error, Result}};
+
+pub trait Push {
+    fn push(self, stack: &mut Stack) -> Result<i32>;
+}
 
 /// A Lua stack.
 #[derive(Debug, Clone)]
@@ -301,7 +305,7 @@ impl Stack {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn push<T: Serialize>(&mut self, value: T) -> Result<i32, ser::Error> {
+    pub fn push<T: Serialize>(&mut self, value: T) -> Result<i32> {
         value.serialize(self)
     }
 
@@ -325,7 +329,7 @@ impl Stack {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn push_slice<T: Serialize>(&mut self, data: &[T]) -> Result<i32, ser::Error> {
+    pub fn push_slice<T: Serialize>(&mut self, data: &[T]) -> Result<i32> {
         let mut i = 0;
         for value in data {
             i += value.serialize(&mut *self)?;
@@ -362,11 +366,11 @@ impl Stack {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get<'de, T>(&'de self) -> Result<T, de::Error>
+    pub fn get<'de, T>(&'de self) -> Result<T>
     where
         T: Deserialize<'de>,
     {
-        let mut deserializer = de::Deserializer::new(self);
+        let mut deserializer = Deserializer::new(self);
         T::deserialize(&mut deserializer)
     }
 
@@ -397,7 +401,7 @@ impl Stack {
     /// # }
     /// ```
     // TODO(vimo) make this mutable when Globals is merged with GlobalsMut.
-    pub fn pop<'de, T>(&'de self) -> Result<T, de::Error>
+    pub fn pop<'de, T>(&'de self) -> Result<T>
     where
         T: Deserialize<'de>,
     {
@@ -581,7 +585,7 @@ pub struct GlobalsMut {
 
 impl GlobalsMut {
     /// Serializes the `value` and sets it as the new value of the global `name`.
-    pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<(), ser::Error>
+    pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<()>
     where
         T: Serialize + fmt::Debug,
     {
@@ -660,7 +664,7 @@ impl Globals {
     }
 
     /// Returns the deserialized value of the global `name`.
-    pub fn get<'de, T>(&'de self, name: &str) -> Result<T, de::Error>
+    pub fn get<'de, T>(&'de self, name: &str) -> Result<T>
     where
         T: Deserialize<'de>,
     {
@@ -668,7 +672,7 @@ impl Globals {
 
         unsafe {
             let name = CString::new(name).map_err(|error| {
-                de::Error::new(error.to_string())
+                Error::InvalidInput { name: "name".into(), error: error.to_string() }
             })?;
             let typ = ffi::lua_getglobal(self.stack.as_ptr(), name.as_ptr());
             debug!("Globals::get() name = {:?}: type = {}", name, typ);
