@@ -123,6 +123,19 @@ impl Stack {
     ///
     /// This function never shrinks the stack; if the stack already has space for the extra elements,
     /// it is left unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push(1);
+    /// assert!(!stack.is_empty());
+    /// ```
     pub fn reserve(&mut self, n: i32) -> bool {
         unsafe { ffi::lua_checkstack(self.as_ptr(), n) != 0 }
     }
@@ -136,9 +149,9 @@ impl Stack {
     ///
     /// ```
     /// # extern crate lua;
-    /// use lua::State;
+    /// use lua::Stack;
     ///
-    /// let stack = State::default().as_stack();
+    /// let mut stack = Stack::new();
     /// assert_eq!(0, stack.top());
     /// ```
     pub fn top(&self) -> i32 {
@@ -151,12 +164,12 @@ impl Stack {
     ///
     /// ```
     /// # extern crate lua;
-    /// use lua::State;
+    /// use lua::Stack;
     ///
-    /// let stack = State::default().as_stack();
+    /// let mut stack = Stack::new();
     /// assert_eq!(0, stack.len());
     ///
-    /// stack.to_owned().push_slice(&[1, 2, 3]);
+    /// stack.push_slice(&[1, 2, 3]);
     /// assert_eq!(3, stack.len());
     /// ```
     pub fn len(&self) -> usize {
@@ -171,12 +184,12 @@ impl Stack {
     ///
     /// ```
     /// # extern crate lua;
-    /// use lua::State;
+    /// use lua::Stack;
     ///
-    /// let stack = State::default().as_stack();
+    /// let mut stack = Stack::new();
     /// assert!(stack.is_empty());
     ///
-    /// stack.to_owned().push(1);
+    /// stack.push(1);
     /// assert!(!stack.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
@@ -189,13 +202,135 @@ impl Stack {
     ///
     /// This function can run arbitrary code when removing an index marked as to-be-closed from the
     /// stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push(1);
+    /// assert!(!stack.is_empty());
+    /// ```
     pub fn set_top(&mut self, index: i32) {
         trace!("set_top() index = {}", index);
         unsafe { ffi::lua_settop(self.as_ptr(), index) }
     }
 
-    pub fn resize(&mut self, _new_len: usize) {
+    /// Resizes the `Stack` in-place so that `len` is equal to `new_len`.
+    /// 
+    /// If `new_len` is greater than `len`, the `Stack` is extended by the difference, with each
+    /// additional slot filled with **nil**. If `new_len` is less than `len`, the `Stack` is simply
+    /// truncated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new size exceeds `i32::MAX` bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.resize(10);
+    /// assert_eq!(10, stack.len());
+    /// ```
+    pub fn resize(&mut self, new_len: usize) {
+        let index = i32::try_from(new_len).unwrap();
+        self.set_top(index)
+    }
 
+    /// Shortens the stack, keeping the first `len` elements and dropping the rest.
+    ///
+    /// If `len` is greater than the stack's current length, this has no effect.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new size exceeds `i32::MAX` bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    /// 
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1, 2, 3, 4])?;
+    /// assert_eq!(4, stack.len());
+    ///
+    /// stack.truncate(2);
+    /// assert_eq!(2, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn truncate(&mut self, len: usize) {
+        let index = i32::try_from(len).unwrap();
+        let top = self.top();
+        if index < top {
+            self.set_top(index)
+        }
+    }
+
+    /// Pushes an element onto a stack.
+    ///
+    /// This method requires `T` to implement [`Serialize`], in order to be able to serialize the
+    /// element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push(1)?;
+    /// assert_eq!(1, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn push<T: Serialize>(&mut self, value: T) -> Result<i32, ser::Error> {
+        value.serialize(self)
+    }
+
+    /// Pushes a slice of elements onto a stack.
+    ///
+    /// This method requires `T` to implement [`Serialize`], in order to be able to serialize the
+    /// element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1, 2, 3, 4])?;
+    /// assert_eq!(4, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn push_slice<T: Serialize>(&mut self, data: &[T]) -> Result<i32, ser::Error> {
+        let mut i = 0;
+        for value in data {
+            i += value.serialize(&mut *self)?;
+        }
+        Ok(i)
     }
 
     /// Returns the type of the value in the given valid `index`, or [`LUA_TNONE`] for a non-valid
@@ -205,6 +340,28 @@ impl Stack {
     }
 
     /// Returns the element on the top of the stack.
+    ///
+    /// This method requires `T` to implement [`Deserialize`], in order to be able to desserialize
+    /// the element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1, 2, 3, 4])?;
+    /// assert_eq!(4, stack.len());
+    /// let v: i32 = stack.get()?;
+    /// assert_eq!(4, v);
+    /// assert_eq!(4, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn get<'de, T>(&'de self) -> Result<T, de::Error>
     where
         T: Deserialize<'de>,
@@ -217,6 +374,29 @@ impl Stack {
     /// 
     /// This function can run arbitrary code when removing an index marked as to-be-closed from the
     /// stack.
+    ///
+    /// This method requires `T` to implement [`Deserialize`], in order to be able to desserialize
+    /// the element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1, 2, 3, 4])?;
+    /// assert_eq!(4, stack.len());
+    /// let v: i32 = stack.pop()?;
+    /// assert_eq!(4, v);
+    /// assert_eq!(3, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    // TODO(vimo) make this mutable when Globals is merged with GlobalsMut.
     pub fn pop<'de, T>(&'de self) -> Result<T, de::Error>
     where
         T: Deserialize<'de>,
@@ -228,6 +408,31 @@ impl Stack {
 
     /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
     /// compiled chunk as a Lua function on top of the stack. Otherwise, it returns an error message.
+    ///
+    /// `name` is the chunk name, used for debug information and error messages.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// const CHUNK: &str = "-- define window size
+    /// width = 200
+    /// height = 300
+    /// ";
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.load_buffer(&mut CHUNK.as_bytes(), "test", lua::Mode::Text)?;
+    /// assert_eq!(1, stack.len());
+    /// stack.call(0, None)?;
+    /// assert_eq!(0, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
         trace!("State::load_buffer() name = {:?}, mode = {:?}", name, mode);
 
@@ -247,11 +452,88 @@ impl Stack {
         }
     }
 
-    pub fn call(&mut self, nargs: i32, nresults: i32, msgh: i32) -> io::Result<()> {
-        trace!("State::call() nargs = {}, nresults = {}, msgh = {}", nargs, nresults, msgh);
+    /// Calls a function.
+    ///
+    /// Like regular Lua calls, this respects the `__call` metamethod. So, here the word "function"
+    /// means any callable value.
+    ///
+    /// To do a call you must use the following protocol: 
+    ///
+    /// - the function to be called is pushed onto the stack
+    /// - the arguments to the call are pushed in direct order; that is, the first argument is
+    ///   pushed first.
+    /// - you call [`.call()`](Stack::call); `nargs` is the number of arguments that you pushed onto
+    ///   the stack.
+    ///
+    /// When the function returns, all arguments and the function value are popped and the call
+    /// results are pushed onto the stack. The number of results is adjusted to `nresults`, unless
+    /// `nresults` is `None`. In this case, all results from the function are pushed; Lua takes care
+    /// that the returned values fit into the stack space, but it does not ensure any extra space in
+    /// the stack. The function results are pushed onto the stack in direct order (the first result
+    /// is pushed first), so that after the call the last result is on the top of the stack.
+    /// 
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// const CHUNK: &str = "-- define window size
+    /// width = 200
+    /// height = 300
+    /// ";
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.load_buffer(&mut CHUNK.as_bytes(), "test", lua::Mode::Text)?;
+    /// assert_eq!(1, stack.len());
+    /// stack.call(0, None)?;
+    /// assert_eq!(0, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn call(&mut self, nargs: i32, nresults: Option<i32>) -> io::Result<()> {
+        trace!("State::call() nargs = {}, nresults = {:?}", nargs, nresults);
+
+        // From the manual (https://www.lua.org/manual/5.4/manual.html#lua_call)
+        //
+        // The number of results is adjusted to `nresults`, unless `nresults` is
+        // `LUA_MULTRET`. In this case, all results from the function are pushed;
+        // Lua takes care that the returned values fit into the stack space, but
+        // it does not ensure any extra space in the stack. The function results
+        // are pushed onto the stack in direct order (the first result is pushed
+        // first), so that after the call the last result is on the top of the
+        // stack.
+        //
+        // In our implementation we don't expose `LUA_MULTRET`. We opted to make
+        // `nresults` an optional value, where `None` is translated to 
+        // `LUA_MULTRET`.
+        let nresults = nresults.unwrap_or(ffi::LUA_MULTRET);
+
+        // From the manual (https://www.lua.org/manual/5.4/manual.html#lua_pcall):
+        //
+        // If msgh is 0, then the error object returned on the stack is exactly 
+        // the original error object. Otherwise, msgh is the stack index of a 
+        // message handler. (This index cannot be a pseudo-index.) In case of 
+        // runtime errors, this handler will be called with the error object and
+        // its return value will be the object returned on the stack by 
+        // `lua_pcall`.
+        //
+        // Typically, the message handler is used to add more debug information
+        // to the error object, such as a stack traceback. Such information
+        // cannot be gathered after the return of `lua_pcall`, since by then the
+        // stack has unwound.
+        //
+        // We opt for the simple approach, to get the error object returned on
+        // the stack.
+        let msgh = 0;
 
         let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
 
+        // The `lua_pcall` function returns one of the following status codes: 
+        // LUA_OK, LUA_ERRRUN, LUA_ERRMEM, or LUA_ERRERR.
         if code == ffi::LUA_OK {
             Ok(())
         } else {

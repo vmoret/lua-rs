@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stack.load_buffer(&mut file, "simple", lua::Mode::Text)?;
     println!("stack size = {}", stack.top());
     
-    stack.call(0, 0, 0)?;
+    stack.call(0, None)?;
     println!("stack size = {}", stack.top());
     
     let globals = stack.as_globals();
