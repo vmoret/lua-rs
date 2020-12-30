@@ -5,7 +5,13 @@ use serde::{Serialize, Deserialize};
 use super::{ffi, state::State, de::Deserializer, error::{Error, Result}};
 
 pub trait Push {
-    fn push(self, stack: &mut Stack) -> Result<i32>;
+    fn push(&self, stack: &mut Stack) -> Result<i32>;
+}
+
+impl<T: Serialize> Push for T {
+    fn push(&self, stack: &mut Stack) -> Result<i32> {
+        self.serialize(stack)
+    }
 }
 
 /// A Lua stack.
@@ -287,8 +293,7 @@ impl Stack {
 
     /// Pushes an element onto a stack.
     ///
-    /// This method requires `T` to implement [`Serialize`], in order to be able to serialize the
-    /// element.
+    /// This method requires `T` to implement [`Push`], in order to be able to push the element.
     ///
     /// # Examples
     ///
@@ -305,14 +310,13 @@ impl Stack {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn push<T: Serialize>(&mut self, value: T) -> Result<i32> {
-        value.serialize(self)
+    pub fn push<T: Push>(&mut self, value: T) -> Result<i32> {
+        value.push(self)
     }
 
     /// Pushes a slice of elements onto a stack.
     ///
-    /// This method requires `T` to implement [`Serialize`], in order to be able to serialize the
-    /// element.
+    /// This method requires `T` to implement [`Push`], in order to be able to push the element.
     ///
     /// # Examples
     ///
@@ -329,10 +333,10 @@ impl Stack {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn push_slice<T: Serialize>(&mut self, data: &[T]) -> Result<i32> {
+    pub fn push_slice<T: Push>(&mut self, data: &[T]) -> Result<i32> {
         let mut i = 0;
         for value in data {
-            i += value.serialize(&mut *self)?;
+            i += value.push(&mut *self)?;
         }
         Ok(i)
     }
@@ -584,14 +588,14 @@ pub struct GlobalsMut {
 }
 
 impl GlobalsMut {
-    /// Serializes the `value` and sets it as the new value of the global `name`.
+    /// Pushes the `value` and sets it as the new value of the global `name`.
     pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<()>
     where
-        T: Serialize + fmt::Debug,
+        T: Push + fmt::Debug,
     {
         trace!("Globals::set() name = {:?}, value = {:?}", name, value);
 
-        value.serialize(&mut self.stack)?;
+        value.push(&mut self.stack)?;
 
         // pops a value from the stack and set it as the new value of global name
         unsafe { ffi::lua_setglobal(self.stack.as_ptr(), name.as_ptr() as _) };
