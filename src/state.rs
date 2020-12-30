@@ -174,6 +174,15 @@ impl State {
         unsafe { ffi::lua_type(self.as_ptr(), index) }
     }
 
+    /// Returns the element on the top of the stack.
+    pub fn get<'de, T>(&'de self) -> Result<T, de::Error>
+    where
+        T: Deserialize<'de>,
+    {
+        let mut deserializer = de::Deserializer::new(self);
+        T::deserialize(&mut deserializer)
+    }
+
     /// Pops and returns the element on the top of the stack.
     /// 
     /// This function can run arbitrary code when removing an index marked as to-be-closed from the
@@ -182,9 +191,50 @@ impl State {
     where
         T: Deserialize<'de>,
     {
-        let t = self.deserialize();
+        let t = self.get();
         unsafe { ffi::lua_pop(self.as_ptr(), 1) };
         t
+    }
+
+    /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
+    /// compiled chunk as a Lua function on top of the stack. Otherwise, it returns an error message.
+    pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
+        trace!("State::load_buffer() name = {:?}, mode = {:?}", name, mode);
+
+        let mut buf = Vec::with_capacity(4 * 1_024);
+        let len = reader.read_to_end(&mut buf)?;
+
+        let mode: &str = mode.into();
+        let code = unsafe { ffi::luaL_loadbufferx(self.as_ptr(), buf.as_ptr() as _, buf.len(), name.as_ptr() as _, mode.as_ptr() as _) };
+
+        if code == ffi::LUA_OK {
+            Ok(len)
+        } else {
+            let error: &str = self.pop().map_err(|error| {
+                io::Error::new(io::ErrorKind::InvalidData, error)
+            })?;
+            Err(io::Error::new(io::ErrorKind::InvalidData, error))
+        }
+    }
+
+    pub fn call(&mut self, nargs: i32, nresults: i32, msgh: i32) -> io::Result<()> {
+        trace!("State::call() nargs = {}, nresults = {}, msgh = {}", nargs, nresults, msgh);
+
+        let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
+
+        if code == ffi::LUA_OK {
+            Ok(())
+        } else {
+            let error: &str = self.pop().map_err(|error| {
+                io::Error::new(io::ErrorKind::InvalidData, error)
+            })?;
+            Err(io::Error::new(io::ErrorKind::InvalidData, error))
+        }
+    }
+
+    /// Returns a reference to the Lua globals.
+    pub fn as_globals(&self) -> &Globals {
+        Globals::new(self)
     }
 }
 
@@ -263,44 +313,6 @@ impl From<Mode> for &str {
             Mode::Text => "t",
             Mode::Binary => "b",
             Mode::Undefined => "bt",
-        }
-    }
-}
-
-impl State {
-    /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
-    /// compiled chunk as a Lua function on top of the stack. Otherwise, it returns an error message.
-    pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
-        trace!("State::load_buffer() name = {:?}, mode = {:?}", name, mode);
-
-        let mut buf = Vec::with_capacity(4 * 1_024);
-        let len = reader.read_to_end(&mut buf)?;
-
-        let mode: &str = mode.into();
-        let code = unsafe { ffi::luaL_loadbufferx(self.as_ptr(), buf.as_ptr() as _, buf.len(), name.as_ptr() as _, mode.as_ptr() as _) };
-
-        if code == ffi::LUA_OK {
-            Ok(len)
-        } else {
-            let error: &str = self.pop().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
-            Err(io::Error::new(io::ErrorKind::InvalidData, error))
-        }
-    }
-
-    pub fn call(&mut self, nargs: i32, nresults: i32, msgh: i32) -> io::Result<()> {
-        trace!("State::call() nargs = {}, nresults = {}, msgh = {}", nargs, nresults, msgh);
-
-        let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
-
-        if code == ffi::LUA_OK {
-            Ok(())
-        } else {
-            let error: &str = self.pop().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
-            Err(io::Error::new(io::ErrorKind::InvalidData, error))
         }
     }
 }
@@ -404,12 +416,5 @@ impl ToOwned for Globals {
     type Owned = GlobalsMut;
     fn to_owned(&self) -> Self::Owned {
         GlobalsMut { state: self.state.clone() }
-    }
-}
-
-impl State {
-    /// Returns a reference to the Lua globals.
-    pub fn as_globals(&self) -> &Globals {
-        Globals::new(self)
     }
 }

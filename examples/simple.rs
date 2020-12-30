@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("ret = {}", ret);
     println!("stack size = {}", state.get_top());
 
-    let c: Config = state.deserialize()?;
+    let c: Config = state.get()?;
     println!("config = {:?}", c);
     println!("stack size = {}", state.get_top());
     

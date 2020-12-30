@@ -7,19 +7,18 @@ use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess, VariantAccess,
     Visitor,
 };
-use serde::Deserialize;
 
 use crate::{
     ffi,
     state::{self, State},
     lref::LRef,
 };
-struct Deserializer<'de> {
+pub(super) struct Deserializer<'de> {
     state: &'de State,
 }
 
 impl<'de> Deserializer<'de> {
-    fn new(state: &'de State) -> Self {
+    pub(super) fn new(state: &'de State) -> Self {
         Deserializer { state }
     }
 
@@ -86,16 +85,6 @@ impl<'de> Deserializer<'de> {
         self.parse_bytes()
             .map(|v| std::str::from_utf8(v).ok())
             .flatten()
-    }
-}
-
-impl State {
-    pub fn deserialize<'de, T>(&'de self) -> Result<T, Error>
-    where
-        T: Deserialize<'de>,
-    {
-        let mut deserializer = Deserializer::new(self);
-        T::deserialize(&mut deserializer)
     }
 }
 
