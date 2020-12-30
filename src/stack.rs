@@ -4,9 +4,31 @@ use serde::{Serialize, Deserialize};
 
 use super::{ffi, state::State, de::Deserializer, error::{Error, Result}};
 
+/// A type that can be pushed onto a Lua stack.
+///
+/// Out of the box this crate provides `Push` implementations for all types that
+/// implement [`Serialize`].
+///
+/// # Examples
+///
+/// ```
+/// # extern crate lua;
+/// use lua::Stack;
+/// use crate::lua::Push;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut stack = Stack::new();
+/// 1989_i32.push(&mut stack)?;
+/// assert_eq!(1, stack.len());
+/// # Ok(())
+/// # }
+/// ```
 pub trait Push {
+    /// Pushes this value onto the given stack and returns the number of slots
+    /// used (typically that will be 1).
     fn push(&self, stack: &mut Stack) -> Result<i32>;
 }
+
 
 impl<T: Serialize> Push for T {
     fn push(&self, stack: &mut Stack) -> Result<i32> {
