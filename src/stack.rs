@@ -29,8 +29,37 @@ pub trait Push {
     /// Pushes this value onto the given stack and returns the number of slots
     /// used (typically that will be 1).
     fn push(&self, stack: &mut Stack) -> Result<i32>;
-}
 
+    /// Pushes a slice of elements onto a stack.
+    ///
+    /// This method requires `T` to implement [`Push`], in order to be able to push the element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, Push};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    /// let numbers = [6, 28, 496, 8128];
+    /// Push::push_slice(&numbers, &mut stack)?;
+    /// assert_eq!(4, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn push_slice(data: &[Self], stack: &mut Stack) -> Result<i32>
+    where
+        Self: Sized,
+    {
+        let mut i = 0;
+        for value in data {
+            i += value.push(&mut *stack)?;
+        }
+        Ok(i)
+    }
+}
 
 impl<T: Serialize> Push for T {
     fn push(&self, stack: &mut Stack) -> Result<i32> {
@@ -52,8 +81,10 @@ impl<T: Serialize> Push for T {
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut stack = Stack::new();
-/// 1989_i32.push(&mut stack)?;
-/// assert_eq!(1989, i32::pull(&stack, -1)?);
+/// let numbers = [6, 28, 496, 8128];
+/// Push::push_slice(&numbers, &mut stack)?;
+/// assert_eq!(496, i32::pull(&stack, -2)?);
+/// assert_eq!(4, stack.len());
 /// # Ok(())
 /// # }
 /// ```
@@ -66,9 +97,24 @@ pub trait Pull<'lua>: Sized {
 
 impl<'lua, T: Deserialize<'lua>> Pull<'lua> for T {
     fn pull(stack: &'lua Stack, index: i32) -> Result<Self> {
-        assert_eq!(index, -1, "only support pulling from the top of the stack");
+        // get the current index of the element at the top of the stack
+        let top = stack.top();
+
+        let mut stack_mut = stack.clone();
+
+        // copy the value at `index` on top of the stack
+        stack_mut.push_value(index);
+
+        // deserialize the value at the top
         let mut deserializer = Deserializer::new(stack);
-        T::deserialize(&mut deserializer)
+        let ret = T::deserialize(&mut deserializer);
+
+        // remove all elements added onto the stack 
+        if stack.top() > top {
+            stack_mut.set_top(top);
+        }
+
+        ret
     }
 }
 
@@ -492,13 +538,40 @@ impl Stack {
     /// # }
     /// ```
     // TODO(vimo) make this mutable when Globals is merged with GlobalsMut.
-    pub fn pop<'de, T>(&'de self) -> Result<T>
+    pub fn pop<'de, T>(&'de mut self) -> Result<T>
     where
         T: Pull<'de>,
     {
+        let stack = self.clone();
         let t = self.get();
-        unsafe { ffi::lua_pop(self.as_ptr(), 1) };
+        unsafe { ffi::lua_pop(stack.as_ptr(), 1) };
         t
+    }
+
+    /// Pops n elements from the stack.
+    /// 
+    /// This function can run arbitrary code when removing an index marked as to-be-closed from the
+    /// stack.
+    /// 
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1, 2, 3, 4])?;
+    /// assert_eq!(4, stack.len());
+    /// stack.pop_unchecked(3);
+    /// assert_eq!(1, stack.len());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pop_unchecked(&mut self, n: i32) {
+        unsafe { ffi::lua_pop(self.as_ptr(), n) }
     }
 
     /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
@@ -814,15 +887,24 @@ impl Globals {
     {
         trace!("Globals::get() name = {:?}", name);
 
+        let mut stack = self.stack.clone();
+
+        // push onto the stack the value of the global name.
         unsafe {
             let name = CString::new(name).map_err(|error| {
                 Error::InvalidInput { name: "name".into(), error: error.to_string() }
             })?;
-            let typ = ffi::lua_getglobal(self.stack.as_ptr(), name.as_ptr());
+            let typ = ffi::lua_getglobal(stack.as_ptr(), name.as_ptr());
             debug!("Globals::get() name = {:?}: type = {}", name, typ);
         }
+        
+        // get the value of the element on the top of the stack
+        let t = self.stack.get();
+        
+        // pop the element on the top of the stack
+        stack.pop_unchecked(1);
 
-        self.stack.pop()
+        t
     }
 }
 
