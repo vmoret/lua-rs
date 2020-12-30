@@ -98,7 +98,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         let typ = self.state.value_type(-1);
         debug!(
             "deserialize_any() top = {}, type = {}",
-            self.state.get_top(),
+            self.state.as_stack().top(),
             typ
         );
 
@@ -188,7 +188,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        trace!("deserialize_u8() top = {}", self.state.get_top());
+        trace!("deserialize_u8() top = {}", self.state.as_stack().top());
         let v = self.parse_integer()?;
         visitor.visit_u8(v)
     }
@@ -543,7 +543,7 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
     where
         K: DeserializeSeed<'de>,
     {
-        trace!("MapAccessor::next_key_seed() top = {}", self.de.state.get_top());
+        trace!("MapAccessor::next_key_seed() top = {}", self.de.state.as_stack().top());
 
         /// Returns `true` when there is a serializable element in the table on the top of the stack.
         ///
@@ -608,7 +608,7 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        trace!("MapAccessor::next_value_seed() top = {}", self.de.state.get_top());
+        trace!("MapAccessor::next_value_seed() top = {}", self.de.state.as_stack().top());
 
         unsafe {
             let state = self.de.state.as_ptr();
@@ -735,7 +735,7 @@ impl<'a, 'de> EnumAccess<'de> for EnumAccessor<'a, 'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        trace!("EnumAccessor::variant_seed() top = {}", self.de.state.get_top());
+        trace!("EnumAccessor::variant_seed() top = {}", self.de.state.as_stack().top());
 
         unsafe {
             let state = self.de.state.as_ptr();
@@ -762,7 +762,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     // If the `Visitor` expected this variant to be a unit variant, the input
     // should have been the plain string case handled in `deserialize_enum`.
     fn unit_variant(self) -> Result<(), Self::Error> {
-        trace!("EnumAccessor::unit_variant() top = {}", self.de.state.get_top());
+        trace!("EnumAccessor::unit_variant() top = {}", self.de.state.as_stack().top());
         error!("EnumAccessor::unit_variant() expected string");
         Err(Error::new("expected string"))
     }
@@ -773,7 +773,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     where
         T: DeserializeSeed<'de>,
     {
-        trace!("EnumAccessor::newtype_variant_seed() top = {}", self.de.state.get_top());
+        trace!("EnumAccessor::newtype_variant_seed() top = {}", self.de.state.as_stack().top());
         seed.deserialize(self.de)
     }
 
@@ -783,7 +783,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     where
         V: Visitor<'de>,
     {
-        trace!("EnumAccessor::tuple_variant() top = {}", self.de.state.get_top());
+        trace!("EnumAccessor::tuple_variant() top = {}", self.de.state.as_stack().top());
         de::Deserializer::deserialize_seq(self.de, visitor)
     }
 
@@ -797,7 +797,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     where
         V: Visitor<'de>,
     {
-        trace!("EnumAccessor::struct_variant() top = {}", self.de.state.get_top());
+        trace!("EnumAccessor::struct_variant() top = {}", self.de.state.as_stack().top());
         de::Deserializer::deserialize_map(self.de, visitor)
     }
 }

@@ -14,14 +14,14 @@ pub struct StackGuard {
 impl StackGuard {
     /// Creates a new `StackGuard` using the current stack size as high-water mark.
     pub fn new(state: State) -> Self {
-        let top = state.get_top();
+        let top = state.as_stack().top();
         Self { state, top }
     }
 }
 
 impl Drop for StackGuard {
     fn drop(&mut self) {
-        let top = self.get_top();
+        let top = self.as_stack().top();
         if top > self.top {
             // remove the items above the high-water mark.
             self.set_top(self.top);

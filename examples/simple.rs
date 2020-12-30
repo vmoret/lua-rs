@@ -56,27 +56,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ret = config.serialize(&mut state)?;
     println!("ret = {}", ret);
-    println!("stack size = {}", state.get_top());
+    println!("stack size = {}", state.as_stack().top());
 
     let c: Config = state.get()?;
     println!("config = {:?}", c);
-    println!("stack size = {}", state.get_top());
+    println!("stack size = {}", state.as_stack().top());
     
     let mut file = File::open("examples/simple.lua")?;
     state.load_buffer(&mut file, "simple", lua::Mode::Text)?;
-    println!("stack size = {}", state.get_top());
+    println!("stack size = {}", state.as_stack().top());
     
     state.call(0, 0, 0)?;
-    println!("stack size = {}", state.get_top());
+    println!("stack size = {}", state.as_stack().top());
     
     let globals = state.as_globals();
     let width: u16 = globals.get("width")?;
     println!("width = {}", width);
-    println!("stack size = {}", state.get_top());
+    println!("stack size = {}", state.as_stack().top());
 
     let height: u16 = globals.get("height")?;
     println!("height = {}", height);
-    println!("stack size = {}", state.get_top());
+    println!("stack size = {}", state.as_stack().top());
 
     Ok(())
 }

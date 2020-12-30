@@ -153,14 +153,6 @@ impl State {
         crate::stack::Stack::new(self)
     }
 
-    /// Returns the index of the top element in the stack.
-    /// 
-    /// Because indices start at 1, this result is equal to the number of elements in the stack; in 
-    /// particular, 0 means an empty stack.
-    pub fn get_top(&self) -> i32 {
-        unsafe { ffi::lua_gettop(self.as_ptr()) }
-    }
-
     /// Accepts any `index`, or 0, and sets the stack top to this `index`. If the new top is greater
     /// than the old one, then the new elements are filled with **nil**. If `index` is 0, then all
     /// stack elements are removed.

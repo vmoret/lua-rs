@@ -67,6 +67,14 @@ impl Stack {
     pub fn reserve(&self, n: i32) -> bool {
         unsafe { ffi::lua_checkstack(self.as_ptr(), n) != 0 }
     }
+
+    /// Returns the index of the top element in the stack.
+    /// 
+    /// Because indices start at 1, this result is equal to the number of elements in the stack; in 
+    /// particular, 0 means an empty stack.
+    pub fn top(&self) -> i32 {
+        unsafe { ffi::lua_gettop(self.as_ptr()) }
+    }
 }
 
 impl ToOwned for Stack {
