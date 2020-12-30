@@ -14,7 +14,7 @@ const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 pub mod types {
     use super::ffi;
 
-    /// The type returned by [`State::value_type`](super::State::value_type) when a non-valid but 
+    /// The type returned by [`Stack::value_type`](crate::Stack::value_type) when a non-valid but 
     /// acceptable index was provided.
     pub const LUA_TNONE: i32 = ffi::LUA_TNONE;
 
@@ -93,6 +93,27 @@ impl Drop for StateBox {
 }
 
 /// The Lua state.
+///
+/// This is a single-threaded reference-counting pointer for a C `lua_State` structure, ensuring
+/// that the Lua state is closed when, and only when, all references are dropped.
+///
+/// # Usage
+///
+/// The `State` API itself is very limited: [`.into_stack()`] consumes this `State` into a [`Stack`].
+/// 
+/// You'll typically want to create a Lua [`Stack`] instead.
+///
+/// [`.into_stack()`]: State::into_stack
+///
+/// # Examples
+///
+/// ```
+/// # extern crate lua;
+/// use lua::State;
+///
+/// let state = State::default();
+/// let stack = state.into_stack();
+/// ```
 pub struct State {
     ptr: *mut StateBox,
 }
@@ -112,12 +133,28 @@ impl fmt::Pointer for State {
 }
 
 impl State {
-    /// Creates a new `State` without a memory allocation limit.
+    /// Creates a new `State` without a memory limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::State;
+    ///
+    /// let state = State::new();
     pub fn new() -> Self {
         Self::with_limit(0)
     }
 
-    /// Creates a new `State` with the given memory allocation `limit`.
+    /// Constructs a new `State` with the specified memory limit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::State;
+    ///
+    /// let state = State::with_limit(8 * 1_024);
     pub fn with_limit(limit: usize) -> Self {
         let ptr = new_state_unchecked(limit);
         let b = box StateBox { ptr, rc: Cell::new(1) };
@@ -145,8 +182,8 @@ impl State {
     /// # extern crate lua;
     /// use lua::State;
     ///
-    /// let lua = State::default();
-    /// let stack = lua.into_stack();
+    /// let state = State::default();
+    /// let stack = state.into_stack();
     /// ```
     pub fn into_stack(self) -> Stack {
         Stack::from(self)
