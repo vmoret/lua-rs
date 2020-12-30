@@ -41,6 +41,8 @@ impl<'a> ser::Serializer for &'a mut Stack {
     type SerializeStructVariant = TableVariantSerializer<'a>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_bool() v = {}", v);
+
         // ensure stack has space for 1 value
         check_stack!(self, 1)?;
 
@@ -53,18 +55,23 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_i8() v = {}", v);
         self.serialize_i64(v.into())
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_i16() v = {}", v);
         self.serialize_i64(v.into())
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_i32() v = {}", v);
         self.serialize_i64(v.into())
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_i64() v = {}", v);
+
         // ensure stack has space for 1 value
         check_stack!(self, 1)?;
 
@@ -75,18 +82,22 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_u8() v = {}", v);
         self.serialize_i64(v.into())
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_u16() v = {}", v);
         self.serialize_i64(v.into())
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_u32() v = {}", v);
         self.serialize_i64(v.into())
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_u64() v = {}", v);
         self.serialize_i64(i64::try_from(v).map_err(|e| {
             error!("unable to cast i64 to u64, {}", e);
             Error::InvalidInteger
@@ -94,10 +105,13 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_f32() v = {}", v);
         self.serialize_f64(v.into())
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_f64() v = {}", v);
+
         // ensure stack has space for 1 value
         check_stack!(self, 1)?;
 
@@ -108,14 +122,18 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_char() v = {}", v);
         self.serialize_str(&v.to_string())
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_str() v = {:?}", v);
         self.serialize_bytes(v.as_bytes())
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_bytes() v = {:?}", v);
+
         // ensure stack has space for 1 value
         check_stack!(self, 1)?;
 
@@ -126,6 +144,7 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_none()");
         self.serialize_unit()
     }
 
@@ -133,10 +152,13 @@ impl<'a> ser::Serializer for &'a mut Stack {
     where
         T: Serialize,
     {
+        trace!("Stack::serialize_some()");
         value.serialize(self)
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_unit()");
+
         // ensure stack has space for 1 value
         check_stack!(self, 1)?;
 
@@ -146,40 +168,45 @@ impl<'a> ser::Serializer for &'a mut Stack {
         Ok(1)
     }
 
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_unit_struct() name = {}", name);
         self.serialize_unit()
     }
 
     fn serialize_unit_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
+        trace!("Stack::serialize_unit_variant() name = {}, variant_index = {}, variant = {}", name, variant_index, variant);
         self.serialize_str(variant)
     }
 
     fn serialize_newtype_struct<T: ?Sized>(
         self,
-        _name: &'static str,
+        name: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
+        trace!("Stack::serialize_newtype_struct() name = {}", name);
         value.serialize(self)
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
         value: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: Serialize,
     {
+        trace!("Stack::serialize_newtype_variant() name = {}, variant_index = {}, variant = {}", name, variant_index, variant);
+        
         // ensure stack has space for the table and the value
         check_stack!(self, 2)?;
 
@@ -199,6 +226,8 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        trace!("Stack::serialize_seq() len = {:?}", len);
+
         // ensure stack has space for the table
         check_stack!(self, 1)?;
 
@@ -227,24 +256,28 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        trace!("Stack::serialize_tuple() len = {}", len);
         self.serialize_seq(Some(len))
     }
 
     fn serialize_tuple_struct(
         self,
-        _name: &'static str,
+        name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        trace!("Stack::serialize_tuple_struct() name = {}, len = {}", name, len);
         self.serialize_seq(Some(len))
     }
 
     fn serialize_tuple_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        trace!("Stack::serialize_newtype_variant() name = {}, variant_index = {}, variant = {}, len = {}", name, variant_index, variant, len);
+        
         // ensure stack has space for 2 x 1 temp record
         check_stack!(self, 1)?;
 
@@ -281,6 +314,8 @@ impl<'a> ser::Serializer for &'a mut Stack {
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        trace!("Stack::serialize_map() len = {:?}", len);
+
         // ensure stack has space for the table
         check_stack!(self, 1)?;
 
@@ -310,19 +345,22 @@ impl<'a> ser::Serializer for &'a mut Stack {
 
     fn serialize_struct(
         self,
-        _name: &'static str,
+        name: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
+        trace!("Stack::serialize_struct() name = {}, len = {}", name, len);
         self.serialize_map(Some(len))
     }
 
     fn serialize_struct_variant(
         self,
-        _name: &'static str,
-        _variant_index: u32,
+        name: &'static str,
+        variant_index: u32,
         variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        trace!("Stack::serialize_struct_variant() name = {}, variant_index = {}, variant = {}, len = {}", name, variant_index, variant, len);
+        
         // ensure stack has space for 2 x 1 temp record
         check_stack!(self, 1)?;
 
