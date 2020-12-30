@@ -638,6 +638,59 @@ impl Stack {
             Err(io::Error::new(io::ErrorKind::InvalidData, error))
         }
     }
+
+    /// Pushes a copy of the element at the given `index` onto the stack.
+    pub fn push_value(&mut self, index: i32) {
+        unsafe { ffi::lua_pushvalue(self.as_ptr(), index) }
+    }
+
+    /// Rotates the stack elements between the valid index `idx` and the top of the stack. The
+    /// elements are rotated `n` positions in the direction of the top, for a positive `n`, or `-n`
+    /// positions in the direction of the bottom, for a negative `n`.
+    /// 
+    /// The absolute value of `n` must not be greater than the size of the slice being rotated.
+    ///
+    /// # Pseudo-indices
+    /// 
+    /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
+    /// stack position.
+    pub fn rotate(&mut self, idx: i32, n: i32) {
+        unsafe { ffi::lua_rotate(self.as_ptr(), idx, n) }
+    }
+
+    /// Removes the element at the given valid `index`, shifting down the elements above this `index`
+    /// to fill the gap.
+    ///
+    /// # Pseudo-indices
+    ///
+    /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
+    /// stack position.
+    pub fn remove(&mut self, index: i32) {
+        unsafe { ffi::lua_remove(self.as_ptr(), index) }
+    }
+
+    /// Moves the top element into the given valid index, shifting up the elements above this index
+    /// to open space.
+    ///
+    /// # Pseudo-indices
+    ///
+    /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
+    /// stack position.
+    pub fn insert(&mut self, index: i32) {
+        unsafe { ffi::lua_insert(self.as_ptr(), index) }
+    }
+
+    /// Moves the top element into the given valid `index` without shifting any element (therefore 
+    /// replacing the value at that given `index`), and then pops the top element.
+    pub fn replace(&mut self, index: i32) {
+        unsafe { ffi::lua_replace(self.as_ptr(), index) }
+    }
+
+    /// Copies the element at index `fromidx` into the valid index `toidx`, replacing the value at
+    /// that position. Values at other positions are not affected.
+    pub fn copy(&mut self, fromidx: i32, toidx: i32) {
+        unsafe { ffi::lua_copy(self.as_ptr(), fromidx, toidx) }
+    }
 }
 
 impl From<State> for Stack {
