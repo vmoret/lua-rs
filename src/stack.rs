@@ -1,8 +1,8 @@
-use std::{borrow::Borrow, convert::TryFrom, io, ffi::CString, fmt, ops::Deref};
+use std::{borrow::Borrow, convert::TryFrom, io};
 
 use serde::{Serialize, Deserialize};
 
-use super::{ffi, state::State, de::Deserializer, error::{Error, Result}};
+use super::{ffi, state::State, de::Deserializer, error::Result};
 
 /// A type that can be [`push`]ed onto a Lua stack.
 ///
@@ -231,11 +231,6 @@ impl Stack {
     #[inline]
     pub(crate) fn as_ptr(&self) -> *mut ffi::lua_State {
         self.state.as_ptr()
-    }
-
-    /// Returns a reference to the Lua globals.
-    pub fn as_globals(&self) -> &Globals {
-        Globals::new(self)
     }
 
     /// Ensures that the stack has space for at least `n` extra elements, that is, that you can
@@ -802,123 +797,8 @@ impl AsRef<Stack> for Stack {
     }
 }
 
-/// A mutable access to the Lua global variables.
-#[derive(Debug, Clone)]
-pub struct GlobalsMut {
-    stack: Stack,
-}
-
-impl GlobalsMut {
-    /// Pushes the `value` and sets it as the new value of the global `name`.
-    pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<()>
-    where
-        T: Push + fmt::Debug,
-    {
-        trace!("Globals::set() name = {:?}, value = {:?}", name, value);
-
-        value.push(&mut self.stack)?;
-
-        // pops a value from the stack and set it as the new value of global name
-        unsafe { ffi::lua_setglobal(self.stack.as_ptr(), name.as_ptr() as _) };
-
-        Ok(())
-    }
-}
-
-impl Deref for GlobalsMut {
-    type Target = Globals;
-    fn deref(&self) -> &Self::Target {
-        Globals::new(&self.stack)
-    }
-}
-
-impl From<Stack> for GlobalsMut {
-    /// Converts a `Stack` into a `GlobalsMut`
-    ///
-    /// This conversion does not allocate or copy memory.
-    #[inline]
-    fn from(stack: Stack) -> Self {
-        Self { stack }
-    }
-}
-
-impl Borrow<Globals> for GlobalsMut {
-    fn borrow(&self) -> &Globals {
-        self.deref()
-    }
-}
-
-impl From<GlobalsMut> for Stack {
-    fn from(this: GlobalsMut) -> Stack {
-        this.stack
-    }
-}
-
-/// An immutable access to the Lua global variables.
-///
-/// # Examples
-///
-/// ```
-/// # extern crate lua;
-/// use lua::Stack;
-///
-/// let stack = Stack::new();
-/// let g = stack.as_globals();
-/// ```
-#[derive(Debug)]
-pub struct Globals {
-    stack: Stack,
-}
-
-impl Globals {
-    /// Directly wraps a [`Stack`] as a `Globals` reference.
-    /// 
-    /// This is a cost-free conversion.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # extern crate lua;
-    /// use lua::Stack;
-    ///
-    /// let stack = Stack::new();
-    /// let g = stack.as_globals();
-    /// ```
-    pub fn new<S: AsRef<Stack>>(stack: &S) -> &Globals {
-        unsafe { &*(stack.as_ref() as *const Stack as *const Globals) }
-    }
-
-    /// Returns the deserialized value of the global `name`.
-    pub fn get<'de, T>(&'de self, name: &str) -> Result<T>
-    where
-        T: Deserialize<'de>,
-    {
-        trace!("Globals::get() name = {:?}", name);
-
-        let mut stack = self.stack.clone();
-
-        // push onto the stack the value of the global name.
-        unsafe {
-            let name = CString::new(name).map_err(|error| {
-                Error::InvalidInput { name: "name".into(), error: error.to_string() }
-            })?;
-            let typ = ffi::lua_getglobal(stack.as_ptr(), name.as_ptr());
-            debug!("Globals::get() name = {:?}: type = {}", name, typ);
-        }
-        
-        // get the value of the element on the top of the stack
-        let t = self.stack.get();
-        
-        // pop the element on the top of the stack
-        stack.pop_unchecked(1);
-
-        t
-    }
-}
-
-impl ToOwned for Globals {
-    type Owned = GlobalsMut;
-    fn to_owned(&self) -> Self::Owned {
-        GlobalsMut { stack: self.stack.clone() }
+impl AsMut<Stack> for Stack {
+    fn as_mut(&mut self) -> &mut Stack {
+        self
     }
 }

@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stack.call(0, None)?;
     println!("stack size = {}", stack.top());
     
-    let globals = stack.as_globals();
+    let globals = lua::Globals::new(&stack);
     let width: u16 = globals.get("width")?;
     println!("width = {}", width);
     println!("stack size = {}", stack.top());
