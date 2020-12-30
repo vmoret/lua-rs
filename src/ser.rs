@@ -24,7 +24,7 @@ pub struct TableVariantSerializer<'a> {
 
 macro_rules! check_stack {
     ($state:expr, $n:expr) => {
-        if $state.check_stack($n) {
+        if $state.as_stack().reserve($n) {
             Ok(())
         } else {
             Err(Error { msg: "".into() })

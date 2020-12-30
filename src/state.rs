@@ -138,15 +138,19 @@ impl State {
         self.inner().ptr.as_ptr()
     }
 
-    /// Ensures that the stack has space for at least `n` extra elements, that is, that you can
-    /// safely push up to `n` values into it. It returns `false` if it cannot fulfill the request,
-    /// either because it would cause the stack to be greater than a fixed maximum size (typically
-    /// at least several thousand elements) or because it cannot allocate memory for the extra space.
-    /// 
-    /// This function never shrinks the stack; if the stack already has space for the extra elements,
-    /// it is left unchanged.
-    pub fn check_stack(&self, n: i32) -> bool {
-        unsafe { ffi::lua_checkstack(self.as_ptr(), n) != 0 }
+    /// Returns a reference to the Lua stack.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::State;
+    ///
+    /// let lua = State::default();
+    /// let stack = lua.as_stack();
+    /// ```
+    pub fn as_stack(&self) -> &crate::stack::Stack {
+        crate::stack::Stack::new(self)
     }
 
     /// Returns the index of the top element in the stack.
