@@ -1,8 +1,8 @@
-use std::{borrow::Borrow, convert::TryFrom, io};
+use std::{borrow::Borrow, convert::TryFrom, ffi::CStr, io};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use super::{ffi, state::State, de::Deserializer, error::Result};
+use super::{de::Deserializer, error::Result, ffi, state::State, types};
 
 /// A type that can be [`push`]ed onto a Lua stack.
 ///
@@ -109,7 +109,7 @@ impl<'lua, T: Deserialize<'lua>> Pull<'lua> for T {
         let mut deserializer = Deserializer::new(stack);
         let ret = T::deserialize(&mut deserializer);
 
-        // remove all elements added onto the stack 
+        // remove all elements added onto the stack
         if stack.top() > top {
             stack_mut.set_top(top);
         }
@@ -125,7 +125,7 @@ pub struct Stack {
 }
 
 /// A list specifying Lua chunk modes.
-/// 
+///
 /// A mode controls whether the chunk can be text or binary (that is, a precompiled chunk).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Mode {
@@ -333,12 +333,12 @@ impl Stack {
     /// assert!(!stack.is_empty());
     /// ```
     pub fn set_top(&mut self, index: i32) {
-        trace!("set_top() index = {}", index);
+        debug!("set_top() index = {}", index);
         unsafe { ffi::lua_settop(self.as_ptr(), index) }
     }
 
     /// Resizes the `Stack` in-place so that `len` is equal to `new_len`.
-    /// 
+    ///
     /// If `new_len` is greater than `len`, the `Stack` is extended by the difference, with each
     /// additional slot filled with **nil**. If `new_len` is less than `len`, the `Stack` is simply
     /// truncated.
@@ -377,7 +377,7 @@ impl Stack {
     /// ```
     /// # extern crate lua;
     /// use lua::Stack;
-    /// 
+    ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut stack = Stack::new();
     /// assert!(stack.is_empty());
@@ -515,7 +515,7 @@ impl Stack {
     }
 
     /// Pops and returns the element on the top of the stack.
-    /// 
+    ///
     /// This function can run arbitrary code when removing an index marked as to-be-closed from the
     /// stack.
     ///
@@ -552,10 +552,10 @@ impl Stack {
     }
 
     /// Pops n elements from the stack.
-    /// 
+    ///
     /// This function can run arbitrary code when removing an index marked as to-be-closed from the
     /// stack.
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -604,21 +604,34 @@ impl Stack {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
+    pub fn load_buffer<R: io::Read>(
+        &mut self,
+        reader: &mut R,
+        name: &str,
+        mode: Mode,
+    ) -> io::Result<usize> {
         trace!("State::load_buffer() name = {:?}, mode = {:?}", name, mode);
 
         let mut buf = Vec::with_capacity(4 * 1_024);
         let len = reader.read_to_end(&mut buf)?;
 
         let mode: &str = mode.into();
-        let code = unsafe { ffi::luaL_loadbufferx(self.as_ptr(), buf.as_ptr() as _, buf.len(), name.as_ptr() as _, mode.as_ptr() as _) };
+        let code = unsafe {
+            ffi::luaL_loadbufferx(
+                self.as_ptr(),
+                buf.as_ptr() as _,
+                buf.len(),
+                name.as_ptr() as _,
+                mode.as_ptr() as _,
+            )
+        };
 
         if code == ffi::LUA_OK {
             Ok(len)
         } else {
-            let error: &str = self.pop().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
+            let error: &str = self
+                .pop()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             Err(io::Error::new(io::ErrorKind::InvalidData, error))
         }
     }
@@ -628,7 +641,7 @@ impl Stack {
     /// Like regular Lua calls, this respects the `__call` metamethod. So, here the word "function"
     /// means any callable value.
     ///
-    /// To do a call you must use the following protocol: 
+    /// To do a call you must use the following protocol:
     ///
     /// - the function to be called is pushed onto the stack
     /// - the arguments to the call are pushed in direct order; that is, the first argument is
@@ -642,7 +655,7 @@ impl Stack {
     /// that the returned values fit into the stack space, but it does not ensure any extra space in
     /// the stack. The function results are pushed onto the stack in direct order (the first result
     /// is pushed first), so that after the call the last result is on the top of the stack.
-    /// 
+    ///
     /// # Examples
     ///
     /// ```
@@ -679,17 +692,17 @@ impl Stack {
         // stack.
         //
         // In our implementation we don't expose `LUA_MULTRET`. We opted to make
-        // `nresults` an optional value, where `None` is translated to 
+        // `nresults` an optional value, where `None` is translated to
         // `LUA_MULTRET`.
         let nresults = nresults.unwrap_or(ffi::LUA_MULTRET);
 
         // From the manual (https://www.lua.org/manual/5.4/manual.html#lua_pcall):
         //
-        // If msgh is 0, then the error object returned on the stack is exactly 
-        // the original error object. Otherwise, msgh is the stack index of a 
-        // message handler. (This index cannot be a pseudo-index.) In case of 
+        // If msgh is 0, then the error object returned on the stack is exactly
+        // the original error object. Otherwise, msgh is the stack index of a
+        // message handler. (This index cannot be a pseudo-index.) In case of
         // runtime errors, this handler will be called with the error object and
-        // its return value will be the object returned on the stack by 
+        // its return value will be the object returned on the stack by
         // `lua_pcall`.
         //
         // Typically, the message handler is used to add more debug information
@@ -703,14 +716,14 @@ impl Stack {
 
         let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
 
-        // The `lua_pcall` function returns one of the following status codes: 
+        // The `lua_pcall` function returns one of the following status codes:
         // LUA_OK, LUA_ERRRUN, LUA_ERRMEM, or LUA_ERRERR.
         if code == ffi::LUA_OK {
             Ok(())
         } else {
-            let error: &str = self.pop().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
+            let error: &str = self
+                .pop()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             Err(io::Error::new(io::ErrorKind::InvalidData, error))
         }
     }
@@ -723,11 +736,11 @@ impl Stack {
     /// Rotates the stack elements between the valid index `idx` and the top of the stack. The
     /// elements are rotated `n` positions in the direction of the top, for a positive `n`, or `-n`
     /// positions in the direction of the bottom, for a negative `n`.
-    /// 
+    ///
     /// The absolute value of `n` must not be greater than the size of the slice being rotated.
     ///
     /// # Pseudo-indices
-    /// 
+    ///
     /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
     /// stack position.
     pub fn rotate(&mut self, idx: i32, n: i32) {
@@ -756,7 +769,7 @@ impl Stack {
         unsafe { ffi::lua_insert(self.as_ptr(), index) }
     }
 
-    /// Moves the top element into the given valid `index` without shifting any element (therefore 
+    /// Moves the top element into the given valid `index` without shifting any element (therefore
     /// replacing the value at that given `index`), and then pops the top element.
     pub fn replace(&mut self, index: i32) {
         unsafe { ffi::lua_replace(self.as_ptr(), index) }
@@ -766,6 +779,39 @@ impl Stack {
     /// that position. Values at other positions are not affected.
     pub fn copy(&mut self, fromidx: i32, toidx: i32) {
         unsafe { ffi::lua_copy(self.as_ptr(), fromidx, toidx) }
+    }
+
+    /// Creates a dump iterator that traverses the stack from bottom to top, returning a tuple of
+    /// stack level and a string desribing the stack value.
+    ///
+    /// The string varies according the element type:
+    ///
+    /// - it returns the value for strings, numbers, integers and booleans.
+    /// - it returns the type name for the other value types.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::Stack;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut stack = Stack::new();
+    /// assert!(stack.is_empty());
+    ///
+    /// stack.push_slice(&[1u16, 2u16])?;
+    /// stack.push_slice(&["hello", "world"])?;
+    /// let mut dump = stack.dump();
+    /// assert_eq!(Some((1, "1".to_string())), dump.next());
+    /// assert_eq!(Some((2, "2".to_string())), dump.next());
+    /// assert_eq!(Some((3, "\"hello\"".to_string())), dump.next());
+    /// assert_eq!(Some((4, "\"world\"".to_string())), dump.next());
+    /// assert_eq!(None, dump.next());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn dump(&self) -> Dump<&Self> {
+        Dump::new(self)
     }
 }
 
@@ -800,5 +846,104 @@ impl AsRef<Stack> for Stack {
 impl AsMut<Stack> for Stack {
     fn as_mut(&mut self) -> &mut Stack {
         self
+    }
+}
+
+/// A dump iterator for `Stack`.
+///
+/// This struct is created by [`Stack::dump()`]. See its documentation for more.
+///
+/// # Example
+///
+/// ```
+/// # extern crate lua;
+/// use lua::Stack;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut stack = Stack::new();
+/// assert!(stack.is_empty());
+///
+/// stack.push_slice(&[1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16])?;
+/// let mut dump = stack.dump();
+/// assert_eq!(Some((1, "1".to_string())), dump.next());
+/// assert_eq!(Some((2, "2".to_string())), dump.next());
+/// # Ok(())
+/// # }
+/// ```
+pub struct Dump<S> {
+    stack: S,
+    i: i32,
+    top: i32,
+}
+
+impl<S> Dump<S>
+where
+    S: AsRef<Stack>,
+{
+    fn new(stack: S) -> Self {
+        let mut this = Self {
+            stack,
+            i: 1,
+            top: 0,
+        };
+
+        // get the depth of the stack
+        this.top = this.stack.as_ref().top();
+        debug!("Dump::new() top = {}", this.top);
+
+        this
+    }
+}
+
+impl<S> Iterator for Dump<S>
+where
+    S: AsRef<Stack>,
+{
+    type Item = (i32, String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.i > self.top {
+            return None;
+        }
+
+        let stack = self.stack.as_ref();
+        let state = stack.as_ptr();
+        let index = self.i;
+
+        // repeat for each level
+        self.i += 1;
+
+        let name = match stack.value_type(index) {
+            // strings
+            types::LUA_TSTRING => unsafe {
+                let ptr = ffi::lua_tostring(state, index);
+                format!("{:?}", CStr::from_ptr(ptr).to_string_lossy())
+            },
+
+            // booleans
+            types::LUA_TBOOLEAN => unsafe {
+                let b = ffi::lua_toboolean(state, index);
+                format!("{:?}", b)
+            },
+
+            // numbers
+            types::LUA_TNUMBER => unsafe {
+                if ffi::lua_tointeger(state, index) != 0 {
+                    let n = ffi::lua_tointeger(state, index);
+                    format!("{:?}", n)
+                } else {
+                    let i = ffi::lua_tonumber(state, index);
+                    format!("{:?}", i)
+                }
+            },
+
+            // other values
+            tp => unsafe {
+                debug!("Dump::next() other value, type = {}", tp);
+                let ptr = ffi::lua_typename(stack.as_ptr(), tp);
+                CStr::from_ptr(ptr).to_string_lossy().to_string()
+            },
+        };
+        Some((index, name))
     }
 }

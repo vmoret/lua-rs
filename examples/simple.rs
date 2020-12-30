@@ -56,27 +56,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ret = config.serialize(&mut stack)?;
     println!("ret = {}", ret);
-    println!("stack size = {}", stack.top());
+    dump(&stack);
 
     let c: Config = stack.get()?;
     println!("config = {:?}", c);
-    println!("stack size = {}", stack.top());
+    dump(&stack);
     
     let mut file = File::open("examples/simple.lua")?;
     stack.load_buffer(&mut file, "simple", lua::Mode::Text)?;
-    println!("stack size = {}", stack.top());
+    dump(&stack);
     
     stack.call(0, None)?;
-    println!("stack size = {}", stack.top());
+    dump(&stack);
     
     let globals = lua::Globals::new(&stack);
     let width: u16 = globals.get("width")?;
     println!("width = {}", width);
-    println!("stack size = {}", stack.top());
+    dump(&stack);
 
     let height: u16 = globals.get("height")?;
     println!("height = {}", height);
-    println!("stack size = {}", stack.top());
+    dump(&stack);
+
+    stack.push_slice(&[1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16])?;
+    dump(&stack);
+    println!("value type = {}", stack.value_type(-1));
+    println!("value type = {}", stack.value_type(1));
 
     Ok(())
+}
+
+fn dump(stack: &lua::Stack) {
+    let dump = stack.dump();
+    println!("Stack");
+    println!("stack size = {}", stack.top());
+    for (lvl, name) in dump {
+        println!("{}: {}", lvl, name);
+    }
+    println!()
 }
