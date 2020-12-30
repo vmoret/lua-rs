@@ -10,21 +10,21 @@ use serde::de::{
 
 use crate::{
     ffi,
-    state::{self, State},
+    state, stack::Stack,
     lref::LRef,
 };
 pub(super) struct Deserializer<'de> {
-    state: &'de State,
+    stack: &'de Stack,
 }
 
 impl<'de> Deserializer<'de> {
-    pub(super) fn new(state: &'de State) -> Self {
-        Deserializer { state }
+    pub(super) fn new(stack: &'de Stack) -> Self {
+        Deserializer { stack }
     }
 
     fn parse_i64(&self) -> Option<i64> {
         let mut isnum = 0;
-        let n = unsafe { ffi::lua_tointegerx(self.state.as_ptr(), -1, &mut isnum) };
+        let n = unsafe { ffi::lua_tointegerx(self.stack.as_ptr(), -1, &mut isnum) };
         if isnum == 0 {
             None
         } else {
@@ -47,7 +47,7 @@ impl<'de> Deserializer<'de> {
 
     fn parse_f64(&self) -> Option<f64> {
         let mut isnum = 0;
-        let n = unsafe { ffi::lua_tonumberx(self.state.as_ptr(), -1, &mut isnum) };
+        let n = unsafe { ffi::lua_tonumberx(self.stack.as_ptr(), -1, &mut isnum) };
         if isnum == 0 {
             None
         } else {
@@ -71,7 +71,7 @@ impl<'de> Deserializer<'de> {
     fn parse_bytes(&self) -> Option<&'de [u8]> {
         let mut len = 0;
         unsafe {
-            let ptr = ffi::lua_tolstring(self.state.as_ptr(), -1, &mut len);
+            let ptr = ffi::lua_tolstring(self.stack.as_ptr(), -1, &mut len);
             if ptr.is_null() {
                 None
             } else {
@@ -95,10 +95,10 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        let typ = self.state.value_type(-1);
+        let typ = self.stack.value_type(-1);
         debug!(
             "deserialize_any() top = {}, type = {}",
-            self.state.as_stack().top(),
+            self.stack.top(),
             typ
         );
 
@@ -114,7 +114,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
             },
             state::LUA_TNIL => self.deserialize_unit(visitor),
             state::LUA_TNUMBER => unsafe {
-                if ffi::lua_isinteger(self.state.as_ptr(), -1) != 0 {
+                if ffi::lua_isinteger(self.stack.as_ptr(), -1) != 0 {
                     self.deserialize_i64(visitor)
                 } else {
                     self.deserialize_f64(visitor)
@@ -144,7 +144,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         trace!("deserialize_bool()");
-        let v = unsafe { ffi::lua_toboolean(self.state.as_ptr(), -1) != 0 };
+        let v = unsafe { ffi::lua_toboolean(self.stack.as_ptr(), -1) != 0 };
         visitor.visit_bool(v)
     }
 
@@ -188,7 +188,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        trace!("deserialize_u8() top = {}", self.state.as_stack().top());
+        trace!("deserialize_u8() top = {}", self.stack.top());
         let v = self.parse_integer()?;
         visitor.visit_u8(v)
     }
@@ -319,7 +319,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         V: Visitor<'de>,
     {
         trace!("deserialize_option()");
-        match self.state.value_type(-1) {
+        match self.stack.value_type(-1) {
             state::LUA_TNIL => self.deserialize_unit(visitor),
             _ => self.deserialize_any(visitor),
         }
@@ -364,19 +364,19 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         trace!("deserialize_seq()");
 
         unsafe {
-            let state = self.state.as_ptr();
+            let stack = self.stack.as_ptr();
 
             // push the length of the table
-            ffi::lua_len(state, -1);
+            ffi::lua_len(stack, -1);
 
             // get the length from the stack
-            let len = ffi::lua_tointeger(state, -1);
+            let len = ffi::lua_tointeger(stack, -1);
 
             // pop one element (the length) from the stack
-            pop(state, 1);
+            pop(stack, 1);
 
             // create a reference to the table into the Lua registry
-            let tref = LRef::register(&self.state);
+            let tref = LRef::register(&self.stack.as_state());
 
             // give the visitor access to each element of the sequence
             let value = visitor.visit_seq(SeqAccessor::new(&mut self, &tref, len))?;
@@ -416,19 +416,19 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         trace!("deserialize_map()");
 
         unsafe {
-            let state = self.state.as_ptr();
+            let stack = self.stack.as_ptr();
 
             // create a reference into the Lua registry to the table
-            let tref = LRef::register(&self.state);
+            let tref = LRef::register(&self.stack.as_state());
 
             // push the first key onto the stack
-            ffi::lua_pushnil(state);
+            ffi::lua_pushnil(stack);
 
             // create a reference into the Lua registry to this key
-            let kref = LRef::register(&self.state);
+            let kref = LRef::register(&self.stack.as_state());
 
             // create an empty reference into the Lua registry for the value 
-            let vref = LRef::empty(&self.state, ffi::LUA_REGISTRYINDEX);
+            let vref = LRef::empty(&self.stack.as_state(), ffi::LUA_REGISTRYINDEX);
 
             // give the visitor access to each element of the sequence
             let value = visitor.visit_map(MapAccessor::new(&mut self, &tref, &kref, &vref))?;
@@ -465,9 +465,9 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         trace!("deserialize_enum() name = {}, variants = {:?}", name, variants);
         
         unsafe {
-            let state = self.state.as_ptr();
+            let stack = self.stack.as_ptr();
 
-            match self.state.value_type(-1) {
+            match self.stack.value_type(-1) {
                 ffi::LUA_TSTRING => {
                     // visit a unit variant
                     let s = self
@@ -480,16 +480,16 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
                 }
                 ffi::LUA_TTABLE => {
                     // store the table in the registry
-                    let tref = ffi::luaL_ref(state, ffi::LUA_REGISTRYINDEX);
+                    let tref = ffi::luaL_ref(stack, ffi::LUA_REGISTRYINDEX);
 
                     // visit a newtype variant, tuple variant, or struct variant
                     let ret = visitor.visit_enum(EnumAccessor::new(self, tref));
 
                     // get the table from the registry and push it onto the stack
-                    ffi::lua_rawgeti(state, ffi::LUA_REGISTRYINDEX, tref.into());
+                    ffi::lua_rawgeti(stack, ffi::LUA_REGISTRYINDEX, tref.into());
 
                     // release the reference to the table
-                    ffi::luaL_unref(state, ffi::LUA_REGISTRYINDEX, tref);
+                    ffi::luaL_unref(stack, ffi::LUA_REGISTRYINDEX, tref);
 
                     ret
                 }
@@ -543,35 +543,35 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
     where
         K: DeserializeSeed<'de>,
     {
-        trace!("MapAccessor::next_key_seed() top = {}", self.de.state.as_stack().top());
+        trace!("MapAccessor::next_key_seed() top = {}", self.de.stack.top());
 
         /// Returns `true` when there is a serializable element in the table on the top of the stack.
         ///
         /// # Safety
         ///
         /// Unsafe as this function leaves an additional element onto the stack.
-        unsafe fn push_next(state: *mut ffi::lua_State, index: i32) -> bool {
+        unsafe fn push_next(stack: *mut ffi::lua_State, index: i32) -> bool {
             trace!("MapAccessor::next_element_seed::push_next() index = {}", index);
 
             // pops a key from the stack, and pushes a key-value pair from the table at the given
             // index
-            while ffi::lua_next(state, index) != 0 {
+            while ffi::lua_next(stack, index) != 0 {
                 // check if the key (-2) and value (-1) are serializable
-                if is_serializable(state, -1) && is_serializable(state, -2) {
+                if is_serializable(stack, -1) && is_serializable(stack, -2) {
                     // we found a serializable element, return!
                     return true;
                 }
 
                 // item is not serializable, ignore it; this means we pop it
                 // from the stack
-                pop(state, 1);
+                pop(stack, 1);
             }
 
             false
         }
 
         unsafe {
-            let state = self.de.state.as_ptr();
+            let stack = self.de.stack.as_ptr();
 
             // get the table from the registry and push it onto the stack
             self.tref.get();
@@ -581,7 +581,7 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
 
             // check if there is is still a serializable element in the sequence
             // and, if so, push it onto the stack
-            if push_next(state, -2) {
+            if push_next(stack, -2) {
                 // replace the value reference with the value on top of the stack
                 self.vref.replace();
 
@@ -592,12 +592,12 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
                 self.kref.replace();
 
                 // pop the table from the stack
-                pop(state, 1);
+                pop(stack, 1);
 
                 ret
             } else {
                 // pop the table from the stack
-                pop(state, 1);
+                pop(stack, 1);
 
                 Ok(None)
             }
@@ -608,10 +608,10 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        trace!("MapAccessor::next_value_seed() top = {}", self.de.state.as_stack().top());
+        trace!("MapAccessor::next_value_seed() top = {}", self.de.stack.top());
 
         unsafe {
-            let state = self.de.state.as_ptr();
+            let stack = self.de.stack.as_ptr();
 
             // take the value from the registry and push onto the stack
             self.vref.take();
@@ -620,7 +620,7 @@ impl<'a, 'de> MapAccess<'de> for MapAccessor<'a, 'de> {
             let ret = seed.deserialize(&mut *self.de);
 
             // pop the value from the stack
-            pop(state, 1);
+            pop(stack, 1);
 
             ret
         }
@@ -665,7 +665,7 @@ impl<'a, 'de> SeqAccess<'de> for SeqAccessor<'a, 'de> {
         ///
         /// Unsafe as this function leaves an additional element onto the stack.
         unsafe fn push_next(
-            state: *mut ffi::lua_State,
+            stack: *mut ffi::lua_State,
             i: &mut i64,
             len: i64,
         ) -> bool {
@@ -673,42 +673,42 @@ impl<'a, 'de> SeqAccess<'de> for SeqAccessor<'a, 'de> {
 
             while *i <= len {
                 // push the next array element onto the stack
-                ffi::lua_geti(state, -1, *i);
+                ffi::lua_geti(stack, -1, *i);
                 *i += 1;
 
                 // check if this item is serializable element
-                if is_serializable(state, -1) {
+                if is_serializable(stack, -1) {
                     // we found a serializable element, return!
                     return true;
                 }
 
                 // item is not serializable, ignore it; this means we pop it
                 // from the stack
-                pop(state, 1);
+                pop(stack, 1);
             }
 
             false
         }
 
         unsafe {
-            let state = self.de.state.as_ptr();
+            let stack = self.de.stack.as_ptr();
 
             // get the table from the registry and push it onto the stack
             self.tref.get();
             
             // check if there is is still a serializable element in the sequence
             // and, if so, push it onto the stack
-            if push_next(state, &mut self.n, self.len) {
+            if push_next(stack, &mut self.n, self.len) {
                 // deserialize the array element
                 let ret = seed.deserialize(&mut *self.de).map(Some);
 
                 // pop the table and array element from the stack
-                pop(state, 2);
+                pop(stack, 2);
 
                 ret
             } else {
                 // pop the table from the stack
-                pop(state, 1);
+                pop(stack, 1);
 
                 Ok(None)
             }
@@ -735,13 +735,13 @@ impl<'a, 'de> EnumAccess<'de> for EnumAccessor<'a, 'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        trace!("EnumAccessor::variant_seed() top = {}", self.de.state.as_stack().top());
+        trace!("EnumAccessor::variant_seed() top = {}", self.de.stack.top());
 
         unsafe {
-            let state = self.de.state.as_ptr();
+            let stack = self.de.stack.as_ptr();
 
             // get the table from the registry and push it onto the stack
-            ffi::lua_rawgeti(state, ffi::LUA_REGISTRYINDEX, self.tref.into());
+            ffi::lua_rawgeti(stack, ffi::LUA_REGISTRYINDEX, self.tref.into());
 
             // The `deserialize_enum` method parsed a `table` character so we are
             // currently inside of a map. The seed will be deserializing itself from
@@ -749,7 +749,7 @@ impl<'a, 'de> EnumAccess<'de> for EnumAccessor<'a, 'de> {
             let ret = seed.deserialize(&mut *self.de);
 
             // pop the table from the stack
-            pop(state, 1);
+            pop(stack, 1);
 
             ret.map(|value| (value, self))
         }
@@ -762,7 +762,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     // If the `Visitor` expected this variant to be a unit variant, the input
     // should have been the plain string case handled in `deserialize_enum`.
     fn unit_variant(self) -> Result<(), Self::Error> {
-        trace!("EnumAccessor::unit_variant() top = {}", self.de.state.as_stack().top());
+        trace!("EnumAccessor::unit_variant() top = {}", self.de.stack.top());
         error!("EnumAccessor::unit_variant() expected string");
         Err(Error::new("expected string"))
     }
@@ -773,7 +773,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     where
         T: DeserializeSeed<'de>,
     {
-        trace!("EnumAccessor::newtype_variant_seed() top = {}", self.de.state.as_stack().top());
+        trace!("EnumAccessor::newtype_variant_seed() top = {}", self.de.stack.top());
         seed.deserialize(self.de)
     }
 
@@ -783,7 +783,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     where
         V: Visitor<'de>,
     {
-        trace!("EnumAccessor::tuple_variant() top = {}", self.de.state.as_stack().top());
+        trace!("EnumAccessor::tuple_variant() top = {}", self.de.stack.top());
         de::Deserializer::deserialize_seq(self.de, visitor)
     }
 
@@ -797,7 +797,7 @@ impl<'a, 'de> VariantAccess<'de> for EnumAccessor<'a, 'de> {
     where
         V: Visitor<'de>,
     {
-        trace!("EnumAccessor::struct_variant() top = {}", self.de.state.as_stack().top());
+        trace!("EnumAccessor::struct_variant() top = {}", self.de.stack.top());
         de::Deserializer::deserialize_map(self.de, visitor)
     }
 }
@@ -836,8 +836,8 @@ impl de::Error for Error {
 }
 
 /// Returns `true` when the value at given `index` is serializable.
-unsafe fn is_serializable(state: *mut ffi::lua_State, index: i32) -> bool {
-    match ffi::lua_type(state, index) {
+unsafe fn is_serializable(stack: *mut ffi::lua_State, index: i32) -> bool {
+    match ffi::lua_type(stack, index) {
         ffi::LUA_TTABLE
         | ffi::LUA_TNIL
         | ffi::LUA_TSTRING
@@ -847,7 +847,7 @@ unsafe fn is_serializable(state: *mut ffi::lua_State, index: i32) -> bool {
     }
 }
 
-unsafe fn pop(state: *mut ffi::lua_State, n: i32) {
-    trace!("pop() top = {}, n = {}", ffi::lua_gettop(state), n);
-    ffi::lua_pop(state, n)
+unsafe fn pop(stack: *mut ffi::lua_State, n: i32) {
+    trace!("pop() top = {}, n = {}", ffi::lua_gettop(stack), n);
+    ffi::lua_pop(stack, n)
 }

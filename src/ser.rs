@@ -3,28 +3,28 @@ use std::{convert::TryFrom, fmt};
 
 use serde::{ser, Serialize};
 
-use crate::{ffi, State};
+use crate::{ffi, Stack};
 
 pub struct Error {
     msg: String,
 }
 
 pub struct TableSerializer<'a> {
-    state: &'a mut State,
+    stack: &'a mut Stack,
     tref: i32,
     i: i64,
 }
 
 pub struct TableVariantSerializer<'a> {
-    state: &'a mut State,
+    stack: &'a mut Stack,
     tref: i32,
     kref: i32,
     i: i64,
 }
 
 macro_rules! check_stack {
-    ($state:expr, $n:expr) => {
-        if $state.as_stack().reserve($n) {
+    ($stack:expr, $n:expr) => {
+        if $stack.reserve($n) {
             Ok(())
         } else {
             Err(Error { msg: "".into() })
@@ -32,7 +32,7 @@ macro_rules! check_stack {
     };
 }
 
-impl<'a> ser::Serializer for &'a mut State {
+impl<'a> ser::Serializer for &'a mut Stack {
     type Ok = i32;
     type Error = Error;
 
@@ -218,7 +218,7 @@ impl<'a> ser::Serializer for &'a mut State {
         };
 
         Ok(TableSerializer {
-            state: self,
+            stack: self,
             tref,
             i: 1, // Lua arrays start at index 1.
         })
@@ -268,7 +268,7 @@ impl<'a> ser::Serializer for &'a mut State {
         };
 
         Ok(TableVariantSerializer {
-            state: self,
+            stack: self,
             tref,
             kref,
             i: 1, // Lua arrays start at index 1.
@@ -294,7 +294,7 @@ impl<'a> ser::Serializer for &'a mut State {
         };
 
         Ok(TableSerializer {
-            state: self,
+            stack: self,
             tref,
             i: ffi::LUA_REFNIL.into(), // we're using this to hold the key references
         })
@@ -340,7 +340,7 @@ impl<'a> ser::Serializer for &'a mut State {
         };
 
         Ok(TableVariantSerializer {
-            state: self,
+            stack: self,
             tref,
             kref,
             i: 1, // Lua arrays start at index 1.
@@ -358,23 +358,23 @@ impl<'a> ser::SerializeSeq for TableSerializer<'a> {
     {
         // ensure stack has space for 1 element (the table; the serialization of
         // the value will check its required stack size)
-        check_stack!(self.state, 1)?;
+        check_stack!(self.stack, 1)?;
 
         unsafe {
             // retrieve the table from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(&mut *self.state)?;
+            let n = value.serialize(&mut *self.stack)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops the value from the stack
-            ffi::lua_seti(self.state.as_ptr(), -2, self.i);
+            ffi::lua_seti(self.stack.as_ptr(), -2, self.i);
             self.i += 1;
 
             // pop the table from the stack
-            ffi::lua_pop(self.state.as_ptr(), 1);
+            ffi::lua_pop(self.stack.as_ptr(), 1);
         }
 
         Ok(())
@@ -382,15 +382,15 @@ impl<'a> ser::SerializeSeq for TableSerializer<'a> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         // ensure stack has space for the table
-        check_stack!(self.state, 1)?;
+        check_stack!(self.stack, 1)?;
 
         unsafe {
             // retrieve the table from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // release the table reference in the Lua registry
-            ffi::luaL_unref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref);
+            ffi::luaL_unref(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref);
         }
 
         Ok(1)
@@ -439,23 +439,23 @@ impl<'a> ser::SerializeTupleVariant for TableVariantSerializer<'a> {
     {
         // ensure stack has space for 1 element (the table; the serialization of
         // the value will check its required stack size)
-        check_stack!(self.state, 1)?;
+        check_stack!(self.stack, 1)?;
 
         unsafe {
             // retrieve the table from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(&mut *self.state)?;
+            let n = value.serialize(&mut *self.stack)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops the value from the stack
-            ffi::lua_seti(self.state.as_ptr(), -2, self.i);
+            ffi::lua_seti(self.stack.as_ptr(), -2, self.i);
             self.i += 1;
 
             // pop the table from the stack
-            ffi::lua_pop(self.state.as_ptr(), 1);
+            ffi::lua_pop(self.stack.as_ptr(), 1);
         }
 
         Ok(())
@@ -464,30 +464,30 @@ impl<'a> ser::SerializeTupleVariant for TableVariantSerializer<'a> {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         // ensure stack has space for 3 elements (the key, the inner table and
         // the outer table)
-        check_stack!(self.state, 3)?;
+        check_stack!(self.stack, 3)?;
 
         unsafe {
             // create the outer table and push it onto the stack
-            ffi::lua_createtable(self.state.as_ptr(), 0, 1);
+            ffi::lua_createtable(self.stack.as_ptr(), 0, 1);
 
             // retrieve the key from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.kref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.kref.into());
             debug_assert_ne!(t, ffi::LUA_TNIL, "expected a key");
 
             // release the key reference in the Lua registry
-            ffi::luaL_unref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.kref);
+            ffi::luaL_unref(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.kref);
 
             // retrieve the inner table (that is the value of the outer table)
             // from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // append the value to the table, this pops both the key and the value 
             // from the stack
-            ffi::lua_settable(self.state.as_ptr(), -3);
+            ffi::lua_settable(self.stack.as_ptr(), -3);
 
             // release the table reference in the Lua registry
-            ffi::luaL_unref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref);
+            ffi::luaL_unref(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref);
         }
 
         Ok(1)
@@ -504,16 +504,16 @@ impl<'a> ser::SerializeMap for TableSerializer<'a> {
     {
         // ensure stack has space for 1 element (the table; the serialization of
         // the key will check its required stack size)
-        check_stack!(self.state, 1)?;
+        check_stack!(self.stack, 1)?;
 
         // serialie the key, pushing it onto the stack
-        let n = key.serialize(&mut *self.state)?;
+        let n = key.serialize(&mut *self.stack)?;
         debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
         self.i = unsafe {
             // create a reference to the pushed key, this pops the key value
             // from the stack
-            ffi::luaL_ref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX).into()
+            ffi::luaL_ref(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX).into()
         };
 
         Ok(())
@@ -525,33 +525,33 @@ impl<'a> ser::SerializeMap for TableSerializer<'a> {
     {
         // ensure stack has space for 2 element (the table and the key; the 
         // serialization of the value will check its required stack size)
-        check_stack!(self.state, 2)?;
+        check_stack!(self.stack, 2)?;
 
         unsafe {
             // retrieve the table from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // retrieve the key from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.i);
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.i);
             debug_assert_ne!(t, ffi::LUA_TNIL, "expected a key");
 
             // release the key reference in the Lua registry
             //
             // SAFETY: The unwrap is ok as this i64 value was originally coerced
             // from an i32 value.
-            ffi::luaL_unref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, i32::try_from(self.i).unwrap());
+            ffi::luaL_unref(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, i32::try_from(self.i).unwrap());
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(&mut *self.state)?;
+            let n = value.serialize(&mut *self.stack)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops both the key and the value 
             // from the stack
-            ffi::lua_settable(self.state.as_ptr(), -3);
+            ffi::lua_settable(self.stack.as_ptr(), -3);
 
             // pop the table from the stack
-            ffi::lua_pop(self.state.as_ptr(), 1);
+            ffi::lua_pop(self.stack.as_ptr(), 1);
         }
 
         Ok(())
@@ -559,15 +559,15 @@ impl<'a> ser::SerializeMap for TableSerializer<'a> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         // ensure stack has space for the table
-        check_stack!(self.state, 1)?;
+        check_stack!(self.stack, 1)?;
 
         unsafe {
             // retrieve the table from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // release the table reference in the Lua registry
-            ffi::luaL_unref(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref);
+            ffi::luaL_unref(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref);
         }
 
         Ok(1)
@@ -609,27 +609,27 @@ impl<'a> ser::SerializeStructVariant for TableVariantSerializer<'a> {
     {
         // ensure stack has space for 1 element (the table; the serialization of
         // the key and value will check its required stack size)
-        check_stack!(self.state, 1)?;
+        check_stack!(self.stack, 1)?;
 
         unsafe {
             // retrieve the table from the Lua registry, pushing it onto the stack
-            let t = ffi::lua_rawgeti(self.state.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
+            let t = ffi::lua_rawgeti(self.stack.as_ptr(), ffi::LUA_REGISTRYINDEX, self.tref.into());
             debug_assert_eq!(t, ffi::LUA_TTABLE, "expected a table");
 
             // serialie the key, pushing it onto the stack
-            let n = key.serialize(&mut *self.state)?;
+            let n = key.serialize(&mut *self.stack)?;
             debug_assert_eq!(n, 1, "expected key to be serialized in one slot");
 
             // serialie the value, pushing it onto the stack
-            let n = value.serialize(&mut *self.state)?;
+            let n = value.serialize(&mut *self.stack)?;
             debug_assert_eq!(n, 1, "expected value to be serialized in one slot");
 
             // append the value to the table, this pops both the key and the value 
             // from the stack
-            ffi::lua_settable(self.state.as_ptr(), -3);
+            ffi::lua_settable(self.stack.as_ptr(), -3);
 
             // pop the table from the stack
-            ffi::lua_pop(self.state.as_ptr(), 1);
+            ffi::lua_pop(self.stack.as_ptr(), 1);
         }
 
         Ok(())

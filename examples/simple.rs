@@ -33,7 +33,7 @@ enum Gender {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let mut state = lua::State::new();
+    let mut stack = lua::Stack::new();
 
     let config = Config {
         employees: vec![
@@ -54,29 +54,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
 
-    let ret = config.serialize(&mut state)?;
+    let ret = config.serialize(&mut stack)?;
     println!("ret = {}", ret);
-    println!("stack size = {}", state.as_stack().top());
+    println!("stack size = {}", stack.top());
 
-    let c: Config = state.get()?;
+    let c: Config = stack.get()?;
     println!("config = {:?}", c);
-    println!("stack size = {}", state.as_stack().top());
+    println!("stack size = {}", stack.top());
     
     let mut file = File::open("examples/simple.lua")?;
-    state.load_buffer(&mut file, "simple", lua::Mode::Text)?;
-    println!("stack size = {}", state.as_stack().top());
+    stack.load_buffer(&mut file, "simple", lua::Mode::Text)?;
+    println!("stack size = {}", stack.top());
     
-    state.call(0, 0, 0)?;
-    println!("stack size = {}", state.as_stack().top());
+    stack.call(0, 0, 0)?;
+    println!("stack size = {}", stack.top());
     
-    let globals = state.as_globals();
+    let globals = stack.as_globals();
     let width: u16 = globals.get("width")?;
     println!("width = {}", width);
-    println!("stack size = {}", state.as_stack().top());
+    println!("stack size = {}", stack.top());
 
     let height: u16 = globals.get("height")?;
     println!("height = {}", height);
-    println!("stack size = {}", state.as_stack().top());
+    println!("stack size = {}", stack.top());
 
     Ok(())
 }

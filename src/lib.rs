@@ -4,14 +4,14 @@
 #[macro_use]
 extern crate log;
 
-pub use self::guard::StackGuard;
-pub use self::state::{Globals, GlobalsMut, Mode, State, types};
-pub use self::stack::{Stack, StackMut};
+// pub use self::guard::StackGuard;
+pub use self::state::{State, types};
+pub use self::stack::{Globals, GlobalsMut, Stack, Mode};
 
 mod alloc;
 pub mod de;
 mod ffi;
-mod guard;
+// mod guard;
 mod lref;
 pub mod ser;
 mod stack;

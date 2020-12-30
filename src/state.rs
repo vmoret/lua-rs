@@ -1,8 +1,7 @@
 //! Lua state.
-use std::{borrow::Borrow, cell::Cell, fmt, ffi::CString, io, ops::Deref, ptr::NonNull};
-use serde::{Deserialize, Serialize};
+use std::{cell::Cell, fmt, ptr::NonNull};
 
-use crate::{alloc, de, ffi, ser};
+use crate::{Stack, alloc, ffi};
 
 pub use types::*;
 
@@ -134,11 +133,11 @@ impl State {
 
     /// Gets a mutable pointer to the Lua state pointer.
     #[inline]
-    pub fn as_ptr(&self) -> *mut ffi::lua_State {
+    pub(crate) fn as_ptr(&self) -> *mut ffi::lua_State {
         self.inner().ptr.as_ptr()
     }
 
-    /// Returns a reference to the Lua stack.
+    /// Consumes the `State` into a [`Stack`].
     ///
     /// # Examples
     ///
@@ -147,90 +146,10 @@ impl State {
     /// use lua::State;
     ///
     /// let lua = State::default();
-    /// let stack = lua.as_stack();
+    /// let stack = lua.into_stack();
     /// ```
-    pub fn as_stack(&self) -> &crate::stack::Stack {
-        crate::stack::Stack::new(self)
-    }
-
-    /// Accepts any `index`, or 0, and sets the stack top to this `index`. If the new top is greater
-    /// than the old one, then the new elements are filled with **nil**. If `index` is 0, then all
-    /// stack elements are removed.
-    /// 
-    /// This function can run arbitrary code when removing an index marked as to-be-closed from the
-    /// stack.
-    pub fn set_top(&self, index: i32) {
-        trace!("set_top() index = {}", index);
-        unsafe { ffi::lua_settop(self.as_ptr(), index) }
-    }
-
-    /// Returns the type of the value in the given valid `index`, or [`LUA_TNONE`] for a non-valid
-    /// but acceptable index.
-    pub fn value_type(&self, index: i32) -> i32 {
-        unsafe { ffi::lua_type(self.as_ptr(), index) }
-    }
-
-    /// Returns the element on the top of the stack.
-    pub fn get<'de, T>(&'de self) -> Result<T, de::Error>
-    where
-        T: Deserialize<'de>,
-    {
-        let mut deserializer = de::Deserializer::new(self);
-        T::deserialize(&mut deserializer)
-    }
-
-    /// Pops and returns the element on the top of the stack.
-    /// 
-    /// This function can run arbitrary code when removing an index marked as to-be-closed from the
-    /// stack.
-    pub fn pop<'de, T>(&'de self) -> Result<T, de::Error>
-    where
-        T: Deserialize<'de>,
-    {
-        let t = self.get();
-        unsafe { ffi::lua_pop(self.as_ptr(), 1) };
-        t
-    }
-
-    /// Loads a reader as a Lua chunk, without running it. If there are no errors, it pushes the
-    /// compiled chunk as a Lua function on top of the stack. Otherwise, it returns an error message.
-    pub fn load_buffer<R: io::Read>(&mut self, reader: &mut R, name: &str, mode: Mode) -> io::Result<usize> {
-        trace!("State::load_buffer() name = {:?}, mode = {:?}", name, mode);
-
-        let mut buf = Vec::with_capacity(4 * 1_024);
-        let len = reader.read_to_end(&mut buf)?;
-
-        let mode: &str = mode.into();
-        let code = unsafe { ffi::luaL_loadbufferx(self.as_ptr(), buf.as_ptr() as _, buf.len(), name.as_ptr() as _, mode.as_ptr() as _) };
-
-        if code == ffi::LUA_OK {
-            Ok(len)
-        } else {
-            let error: &str = self.pop().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
-            Err(io::Error::new(io::ErrorKind::InvalidData, error))
-        }
-    }
-
-    pub fn call(&mut self, nargs: i32, nresults: i32, msgh: i32) -> io::Result<()> {
-        trace!("State::call() nargs = {}, nresults = {}, msgh = {}", nargs, nresults, msgh);
-
-        let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
-
-        if code == ffi::LUA_OK {
-            Ok(())
-        } else {
-            let error: &str = self.pop().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, error)
-            })?;
-            Err(io::Error::new(io::ErrorKind::InvalidData, error))
-        }
-    }
-
-    /// Returns a reference to the Lua globals.
-    pub fn as_globals(&self) -> &Globals {
-        Globals::new(self)
+    pub fn into_stack(self) -> Stack {
+        Stack::from(self)
     }
 }
 
@@ -289,128 +208,5 @@ impl Drop for State {
 impl AsRef<State> for State {
     fn as_ref(&self) -> &State {
         self
-    }
-}
-
-/// Lua chunk mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Mode {
-    /// Text only chunk.
-    Text,
-    /// Binary only chunk.
-    Binary,
-    /// Undefined chunk, can be binary or text.
-    Undefined,
-}
-
-impl From<Mode> for &str {
-    fn from(mode: Mode) -> Self {
-        match mode {
-            Mode::Text => "t",
-            Mode::Binary => "b",
-            Mode::Undefined => "bt",
-        }
-    }
-}
-
-/// A mutable access to the Lua global variables.
-#[derive(Debug, Clone)]
-pub struct GlobalsMut {
-    state: State,
-}
-
-impl GlobalsMut {
-    /// Serializes the `value` and sets it as the new value of the global `name`.
-    pub fn insert<T>(&mut self, name: &str, value: &T) -> Result<(), ser::Error>
-    where
-        T: Serialize + fmt::Debug,
-    {
-        trace!("Globals::set() name = {:?}, value = {:?}", name, value);
-
-        value.serialize(&mut self.state)?;
-
-        // pops a value from the stack and set it as the new value of global name
-        unsafe { ffi::lua_setglobal(self.state.as_ptr(), name.as_ptr() as _) };
-
-        Ok(())
-    }
-}
-
-impl Deref for GlobalsMut {
-    type Target = Globals;
-    fn deref(&self) -> &Self::Target {
-        Globals::new(&self.state)
-    }
-}
-
-impl From<State> for GlobalsMut {
-    /// Converts a `State` into a `GlobalsMut`
-    ///
-    /// This conversion does not allocate or copy memory.
-    #[inline]
-    fn from(state: State) -> Self {
-        Self { state }
-    }
-}
-
-impl Borrow<Globals> for GlobalsMut {
-    fn borrow(&self) -> &Globals {
-        self.deref()
-    }
-}
-
-impl From<GlobalsMut> for State {
-    fn from(this: GlobalsMut) -> State {
-        this.state
-    }
-}
-
-/// An immutable access to the Lua global variables.
-///
-/// # Examples
-///
-/// ```
-/// # extern crate lua;
-/// use lua::State;
-///
-/// let lua = State::default();
-/// let g = lua.as_globals();
-/// ```
-#[derive(Debug)]
-pub struct Globals {
-    state: State,
-}
-
-impl Globals {
-    /// Directly wraps a [`State`] as a `Globals` reference.
-    /// 
-    /// This is a cost-free conversion.
-    pub fn new<S: AsRef<State>>(state: &S) -> &Globals {
-        unsafe { &*(state.as_ref() as *const State as *const Globals) }
-    }
-
-    /// Returns the deserialized value of the global `name`.
-    pub fn get<'de, T>(&'de self, name: &str) -> Result<T, de::Error>
-    where
-        T: Deserialize<'de>,
-    {
-        trace!("Globals::get() name = {:?}", name);
-
-        unsafe {
-            let name = CString::new(name).map_err(|error| {
-                de::Error::new(error.to_string())
-            })?;
-            let typ = ffi::lua_getglobal(self.state.as_ptr(), name.as_ptr());
-            debug!("Globals::get() name = {:?}: type = {}", name, typ);
-        }
-
-        self.state.pop()
-    }
-}
-
-impl ToOwned for Globals {
-    type Owned = GlobalsMut;
-    fn to_owned(&self) -> Self::Owned {
-        GlobalsMut { state: self.state.clone() }
     }
 }
