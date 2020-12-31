@@ -9,4 +9,4 @@ pub use self::state::{types, State};
 mod alloc;
 mod error;
 mod ffi;
-mod state;
+pub mod state;

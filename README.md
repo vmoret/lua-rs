@@ -6,3 +6,4 @@ manual (4th edition).
 ## Examples
 
 - [A bare-bones stand-alone Lua interpreter](examples/simple.rs)
+- [Pushing, querying elements and other stack operations](examples/stack.rs)
