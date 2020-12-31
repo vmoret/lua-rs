@@ -3,50 +3,64 @@ use std::fmt;
 /// A specialized [`Result`](std::result::Result) type for Lua operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The error type for Lua operations of the [`Push`], [`Pull`], Pop, and associated
-/// traits.
-///
-/// [`Push`]: ../stack/trait.Push.html
-/// [`Pull`]: ../stack/trait.Pull.html
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Error {
-    /// A custom error.
-    Custom(String),
-    /// An invalid input was provided for `name`.
-    InvalidInput { 
-        /// The name of the argument.
-        name: String, 
-        /// The string describing the error.
-        error: String,
-    },
-    /// An invalid Lua integer was encountered.
-    InvalidInteger,
-    /// An invalid Lua number was encountered.
-    InvalidNumber,
-    /// An invalid Lua string was encountered.
-    InvalidString,
-    /// An invalid Lua type was encountered.
-    InvalidType(i32),
-    /// The Lua stack has overflown.
-    StackOverflow,
+/// The error type for Lua operations.
+pub struct Error {
+    kind: ErrorKind,
+    error: Box<dyn std::error::Error + Send + Sync>,
 }
 
-impl std::error::Error for Error {}
+/// A list specifying general categories of Lua error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    Other,
+}
+
+impl ErrorKind {
+    fn as_str(&self) -> &str {
+        match *self {
+            ErrorKind::Other => "other error",
+        }
+    }
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Error {
+    /// Creates a new Lua error from a known kind of error as well as an arbitrary error payload.
+    pub fn new<E>(kind: ErrorKind, error: E) -> Self 
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        Self::_new(kind, error.into())
+    }
+
+    fn _new(kind: ErrorKind, error: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        Self { kind, error }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
+    }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Error")
+            .field("kind", &self.kind)
+            .field("error", &self.error)
+            .finish()
+    }
+}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("error")
-    }
-}
-
-impl serde::de::Error for Error {
-    fn custom<T: fmt::Display>(msg: T) -> Self {
-        Self::Custom(msg.to_string())
-    }
-}
-
-impl serde::ser::Error for Error {
-    fn custom<T: fmt::Display>(msg: T) -> Self {
-        Self::Custom(msg.to_string())
+        fmt::Display::fmt(&self.error, f)
     }
 }

@@ -1,7 +1,7 @@
 //! Lua state.
 use std::{cell::Cell, fmt, ptr::NonNull};
 
-use crate::{Stack, alloc, ffi};
+use crate::{alloc, ffi};
 
 pub use types::*;
 
@@ -97,14 +97,6 @@ impl Drop for StateBox {
 /// This is a single-threaded reference-counting pointer for a C `lua_State` structure, ensuring
 /// that the Lua state is closed when, and only when, all references are dropped.
 ///
-/// # Usage
-///
-/// The `State` API itself is very limited: [`.into_stack()`] consumes this `State` into a [`Stack`].
-/// 
-/// You'll typically want to create a Lua [`Stack`] instead.
-///
-/// [`.into_stack()`]: State::into_stack
-///
 /// # Examples
 ///
 /// ```
@@ -112,7 +104,6 @@ impl Drop for StateBox {
 /// use lua::State;
 ///
 /// let state = State::default();
-/// let stack = state.into_stack();
 /// ```
 pub struct State {
     ptr: *mut StateBox,
@@ -172,21 +163,6 @@ impl State {
     #[inline]
     pub(crate) fn as_ptr(&self) -> *mut ffi::lua_State {
         self.inner().ptr.as_ptr()
-    }
-
-    /// Consumes the `State` into a [`Stack`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # extern crate lua;
-    /// use lua::State;
-    ///
-    /// let state = State::default();
-    /// let stack = state.into_stack();
-    /// ```
-    pub fn into_stack(self) -> Stack {
-        Stack::from(self)
     }
 }
 
