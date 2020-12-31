@@ -13,12 +13,19 @@ pub struct Error {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// An invalid input was provided.
+    InvalidInput,
+    /// An invalid data was encountered.
+    InvalidData,
+    /// An error not in this list was encountered.
     Other,
 }
 
 impl ErrorKind {
     fn as_str(&self) -> &str {
         match *self {
+            ErrorKind::InvalidInput => "invalid input",
+            ErrorKind::InvalidData => "invalid data",
             ErrorKind::Other => "other error",
         }
     }
@@ -32,7 +39,7 @@ impl fmt::Display for ErrorKind {
 
 impl Error {
     /// Creates a new Lua error from a known kind of error as well as an arbitrary error payload.
-    pub fn new<E>(kind: ErrorKind, error: E) -> Self 
+    pub fn new<E>(kind: ErrorKind, error: E) -> Self
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
@@ -64,3 +71,15 @@ impl fmt::Display for Error {
         fmt::Display::fmt(&self.error, f)
     }
 }
+
+macro_rules! impl_from_errors {
+    (($($ty:ty), *), $var:ident) => {$(
+        impl From<$ty> for Error {
+            fn from(error: $ty) -> Self {
+                Self::new(ErrorKind::$var, error)
+            }
+        }
+    )*};
+}
+
+impl_from_errors!((std::ffi::NulError, std::io::Error), InvalidData);

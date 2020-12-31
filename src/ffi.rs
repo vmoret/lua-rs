@@ -223,6 +223,7 @@ extern "C" {
         name: *const c_char,
         mode: *const c_char,
     ) -> c_int;
+    pub fn luaL_loadstring(state: *mut lua_State, s: *const c_char) -> c_int;
     pub fn luaL_ref(state: *mut lua_State, t: c_int) -> c_int;
     pub fn luaL_unref(state: *mut lua_State, t: c_int, lref: c_int);
     pub fn luaL_checkstack(state: *mut lua_State, size: c_int, msg: *const c_char);

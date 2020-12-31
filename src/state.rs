@@ -1,7 +1,7 @@
 //! Lua state.
-use std::{cell::Cell, fmt, ptr::NonNull};
+use std::{cell::Cell, ffi::{CStr, CString}, fmt, ptr::NonNull};
 
-use crate::{alloc, ffi};
+use crate::{alloc, error::{Error, ErrorKind, Result}, ffi};
 
 pub use types::*;
 
@@ -175,10 +175,61 @@ impl State {
     /// use lua::State;
     ///
     /// let mut state = State::new();
-    /// state.openlibs();
+    /// state.open_libs();
     /// ```
-    pub fn openlibs(&mut self) {
+    pub fn open_libs(&mut self) {
         unsafe { ffi::luaL_openlibs(self.as_ptr()) }
+    }
+
+    /// Loads a string as a Lua chunk. This function uses [`.load()`] to load the chunk in the
+    /// provided data.
+    /// 
+    /// This function returns the same results as [`.load()`].
+    ///
+    /// Also as [`.load()`], this function only loads the chunk; it does not run it.
+    ///
+    /// [`.load()`]: State::load
+    pub fn load_string<T: Into<Vec<u8>>>(&mut self, t: T) -> Result<()> {
+        let s = CString::new(t)?;
+
+        // load the zero terminated C string
+        let code = unsafe { ffi::luaL_loadstring(self.as_ptr(), s.as_ptr()) };
+        self.handle_result(code, ())
+    }
+
+    /// Calls a function (or a callable object) in protected mode.
+    pub fn pcall(&mut self, nargs: i32, nresults: i32, msgh: i32) -> Result<()> {
+        let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
+        self.handle_result(code, ())
+    }
+
+    /// Pops n elements from the stack.
+    /// 
+    /// This can run arbitrary code when removing an index marked as to-be-closed from the stack.
+    pub fn pop(&mut self, n: i32) {
+        unsafe { ffi::lua_pop(self.as_ptr(), n) }
+    }
+
+    /// Converts the Lua value at the given `index` to a C string.
+    pub fn as_c_str<'a>(&'a self, index: i32) -> &'a CStr {
+        unsafe {
+            CStr::from_ptr(ffi::lua_tostring(self.as_ptr(), index))
+        }
+    }
+
+    /// Returns a [`Result<T>`](crate::error::Result) based on provided result `code`.
+    ///
+    /// When `code` is not `LUA_OK` or `LUA_YIELD`, it will read the error code from the top of the
+    /// stack and return an [`Err`], otherwise [`Ok`] is returned with the provided `value`.
+    fn handle_result<T>(&self, code: i32, value: T) -> Result<T> {
+        match code {
+            ffi::LUA_OK | ffi::LUA_YIELD => Ok(value),
+            errcode => {
+                let errmsg = self.as_c_str(-1);
+                let error = format!("{} (code = {})", errmsg.to_string_lossy(), errcode);
+                Err(Error::new(ErrorKind::InvalidData, error))
+            }
+        }
     }
 }
 
