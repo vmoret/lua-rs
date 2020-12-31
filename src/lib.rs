@@ -20,3 +20,4 @@ mod ser;
 mod stack;
 mod state;
 mod globals;
+pub mod table;
