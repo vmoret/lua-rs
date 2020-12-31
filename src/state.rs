@@ -133,6 +133,7 @@ impl State {
     /// use lua::State;
     ///
     /// let state = State::new();
+    /// ```
     pub fn new() -> Self {
         Self::with_limit(0)
     }
@@ -146,6 +147,7 @@ impl State {
     /// use lua::State;
     ///
     /// let state = State::with_limit(8 * 1_024);
+    /// ```
     pub fn with_limit(limit: usize) -> Self {
         let ptr = new_state_unchecked(limit);
         let b = box StateBox { ptr, rc: Cell::new(1) };
@@ -160,9 +162,23 @@ impl State {
     }
 
     /// Gets a mutable pointer to the Lua state pointer.
-    #[inline]
-    pub(crate) fn as_ptr(&self) -> *mut ffi::lua_State {
+    fn as_ptr(&self) -> *mut ffi::lua_State {
         self.inner().ptr.as_ptr()
+    }
+
+    /// Opens all standard Lua libraries into the given state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate lua;
+    /// use lua::State;
+    ///
+    /// let mut state = State::new();
+    /// state.openlibs();
+    /// ```
+    pub fn openlibs(&mut self) {
+        unsafe { ffi::luaL_openlibs(self.as_ptr()) }
     }
 }
 
