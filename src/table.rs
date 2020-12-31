@@ -134,9 +134,198 @@ pub enum Key<'a> {
     /// 
     /// As in Lua, uaing this variant may trigger a metamethod for the `index` event.
     Index(i64),
+    /// An integer key.
+    /// 
+    /// ## Setting values
+    /// 
+    /// Does the equivalent to `t[n] = v`, where `t` is the table at the given index and `v` is the
+    /// value on the top of the stack.
+    /// 
+    /// This pops the value from the stack.
+    /// 
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, table::{Table, Key}};
+    /// 
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    /// let mut stack = Stack::new();
+    ///
+    /// // create a new empty table and push it on the stack
+    /// let table = Table::new(&mut stack);
+    /// 
+    /// // push the value onto the stack
+    /// table.as_mut().push(1989_u16)?;
+    /// 
+    /// // set the value into the table
+    /// table.set(-2, Key::RawIndex(1));
+    /// 
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// 
+    /// The assignment is raw, that is, it does not use the `__newindex` metavalue.
+    /// 
+    /// ## Getting values
+    ///
+    /// Pushes onto the stack the value `t[n]`. where `t` is the table at given `index`.
+    /// 
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, table::{Table, Key}};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    /// let mut stack = Stack::new();
+    ///
+    /// // create a new empty table and push it on the stack
+    /// let table = Table::new(&mut stack);
+    /// 
+    /// // push the value onto the stack
+    /// table.as_mut().push(1989_u16)?;
+    /// 
+    /// // pops the value from the table and store it into the table
+    /// table.set(-2, Key::RawIndex(1));
+    /// 
+    /// // pushes the value in the table with index `1` onto the stack
+    /// table.get(-1, Key::RawIndex(1));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// The access is raw, that is, it does not use the `__index` metavalue.
     RawIndex(i64),
-    RawTable,
-    Table,
+    /// An integer key.
+    /// 
+    /// ## Setting values
+    /// 
+    /// Does the equivalent to `t[n] = v`, where `t` is the table at the given index and `v` is the
+    /// value on the top of the stack.
+    /// 
+    /// This pops the value from the stack.
+    /// 
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, table::{Table, Key}};
+    /// 
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    /// let mut stack = Stack::new();
+    ///
+    /// // create a new empty table and push it on the stack
+    /// let table = Table::new(&mut stack);
+    /// 
+    /// // push the key onto the stack
+    /// table.as_mut().push("year")?;
+    ///
+    /// // push the value onto the stack
+    /// table.as_mut().push(1989_u16)?;
+    /// 
+    /// // set the value into the table
+    /// table.set(-3, Key::RawPair);
+    /// 
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// 
+    /// The assignment is raw, that is, it does not use the `__newindex` metavalue.
+    /// 
+    /// ## Getting values
+    ///
+    /// Pushes onto the stack the value `t[n]`. where `t` is the table at given `index`.
+    /// 
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, table::{Table, Key}};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    /// let mut stack = Stack::new();
+    ///
+    /// // create a new empty table and push it on the stack
+    /// let table = Table::new(&mut stack);
+    /// 
+    /// // push the value onto the stack
+    /// table.as_mut().push(1989_u16)?;
+    /// 
+    /// // pops the value from the table and store it into the table
+    /// table.set(-2, "year");
+    ///
+    /// // push the key onto the stack
+    /// table.as_mut().push("year")?;
+    /// 
+    /// // pushes the value in the table with key
+    /// table.get(-2, Key::RawPair);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// The access is raw, that is, it does not use the `__index` metavalue.
+    RawPair,
+    /// An key/value pair (with metavalues).
+    /// 
+    /// ## Setting values
+    /// 
+    /// Does the equivalent to `t[n] = v`, where `t` is the table at the given index and `v` is the
+    /// value on the top of the stack, and `k` is the value just below the top.
+    /// 
+    /// This pops both the key and the value from the stack.
+    /// 
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, table::{Table, Key}};
+    /// 
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    /// let mut stack = Stack::new();
+    ///
+    /// // create a new empty table and push it on the stack
+    /// let table = Table::new(&mut stack);
+    /// 
+    /// // push the key onto the stack
+    /// table.as_mut().push("year")?;
+    ///
+    /// // push the value onto the stack
+    /// table.as_mut().push(1989_u16)?;
+    /// 
+    /// // set the value into the table
+    /// table.set(-3, Key::Pair);
+    /// 
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// 
+    /// The assignment is raw, that is, it does not use the `__newindex` metavalue.
+    /// 
+    /// ## Getting values
+    ///
+    /// Pushes onto the stack the value `t[k]`. where `t` is the table at given `index` and `k` is 
+    /// the value on the top of the stack.
+    /// 
+    /// This function pops the key from the stack, pushing the resulting value in its place.
+    /// 
+    /// ```
+    /// # extern crate lua;
+    /// use lua::{Stack, table::{Table, Key}};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> { 
+    /// let mut stack = Stack::new();
+    ///
+    /// // create a new empty table and push it on the stack
+    /// let table = Table::new(&mut stack);
+    /// 
+    /// // push the value onto the stack
+    /// table.as_mut().push(1989_u16)?;
+    /// 
+    /// // pops the value from the table and store it into the table
+    /// table.set(-2, "year");
+    ///
+    /// // push the key onto the stack
+    /// table.as_mut().push("year")?;
+    /// 
+    /// // pushes the value in the table with key
+    /// table.get(-2, Key::Pair);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// As in Lua, this variant may trigger a metamethod for the `index` event
+    Pair,
 }
 
 impl From<i32> for Key<'_> {
@@ -224,10 +413,10 @@ impl Table {
                 Key::RawIndex(n) => {
                     ffi::lua_rawgeti(state, index, n)
                 }
-                Key::RawTable => {
+                Key::RawPair => {
                     ffi::lua_rawget(state, index)
                 }
-                Key::Table => {
+                Key::Pair => {
                     ffi::lua_gettable(state, index)
                 }
             }
@@ -255,10 +444,10 @@ impl Table {
                 Key::RawIndex(n) => {
                     ffi::lua_rawseti(state, index, n)
                 }
-                Key::RawTable => {
+                Key::RawPair => {
                     ffi::lua_rawset(state, index)
                 }
-                Key::Table => {
+                Key::Pair => {
                     ffi::lua_settable(state, index)
                 }
             }
