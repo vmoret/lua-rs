@@ -779,6 +779,27 @@ impl State {
     pub fn upvalue_index(&self, i: i32) -> i32 {
         ffi::lua_upvalueindex(i)
     }
+
+    /// Checks whether the function argument `arg` is an integer (or can be converted to an integer)
+    /// and returns this integer.
+    pub fn check_integer(&self, arg: i32) -> i64 {
+        unsafe { ffi::luaL_checkinteger(self.as_ptr(), arg) }
+    }
+
+    /// Checks whether the function argument `arg` is a string and returns this string.
+    pub fn check_string<'a>(&'a self, arg: i32) -> &'a [u8] {
+        unsafe {
+            let mut len = 0;
+            let ptr = ffi::luaL_checklstring(self.as_ptr(), arg, &mut len);
+            let data = ptr as *const u8;
+            std::slice::from_raw_parts(data, len)
+        }
+    }
+
+    /// Checks whether the function argument `arg` is a number and returns this number.
+    pub fn check_number(&self, arg: i32) -> f64 {
+        unsafe { ffi::luaL_checknumber(self.as_ptr(), arg) }
+    }
 }
 
 impl Default for State {

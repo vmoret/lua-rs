@@ -238,6 +238,12 @@ extern "C" {
 
     pub fn lua_getglobal(state: *mut lua_State, name: *const c_char) -> c_int;
     pub fn lua_setglobal(state: *mut lua_State, name: *const c_char);
+
+    pub fn luaL_checkinteger(state: *mut lua_State, arg: i32) -> lua_Integer;
+    pub fn luaL_checklstring(state: *mut lua_State, arg: i32, len: *mut usize) -> *const c_char;
+    pub fn luaL_checknumber(state: *mut lua_State, arg: i32) -> lua_Number;
+    pub fn luaL_checkudata(state: *mut lua_State, arg: i32, tname: *const c_char) -> *mut c_void;
+
 }
 
 // The following are re-implementations of what are macros in the Lua C API
