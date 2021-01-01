@@ -7,4 +7,4 @@ end
 
 -- define background color
 -- background = {red = 0.30, green = 0.10, blue = 0}
-background = RED
+background = "red"

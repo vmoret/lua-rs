@@ -29,18 +29,31 @@ mod config {
         type Error = lua::Error;
         fn try_from(state: &mut lua::State) -> Result<Self, Self::Error> {
             let tp = state.get_global("background")?;
-            if tp != lua::types::LUA_TTABLE {
-                return Err(lua::Error::new(
+            match tp {
+                lua::types::LUA_TSTRING => {
+                    let v = state.as_bytes(-1);
+                    let name = std::str::from_utf8(v)?;
+                    for (key, red, green, blue) in COLOR_TABLE.iter().cloned() {
+                        if key.eq_ignore_ascii_case(name) {
+                            return Ok(Color(red, green, blue));
+                        }
+                    }
+                    Err(lua::Error::new(
+                        lua::ErrorKind::InvalidInput,
+                        format!("invalid color name ({})", name),
+                    ))
+                }
+                lua::types::LUA_TTABLE => {
+                    let red = get_color_field(state, "red")?;
+                    let green = get_color_field(state, "green")?;
+                    let blue = get_color_field(state, "blue")?;
+                    Ok(Color(red, green, blue))
+                }
+                _ => Err(lua::Error::new(
                     lua::ErrorKind::InvalidInput,
-                    "value on top of stack is not a table",
-                ));
+                    "value on top of stack is not a table or string",
+                ))
             }
-
-            let red = get_color_field(state, "red")?;
-            let green = get_color_field(state, "green")?;
-            let blue = get_color_field(state, "blue")?;
-
-            Ok(Color(red, green, blue))
         }
     }
 
@@ -64,28 +77,6 @@ mod config {
         })
     }
 
-    // assume that table is on the top of the stack
-    fn set_color_field(state: &mut lua::State, name: &str, color: u8) -> lua::Result<()> {
-        let mut state = lua::state::StackGuard::new(state);
-
-        state.push_string(name)?; // key
-        state.push_number(f32::from(color) / f32::from(MAX_COLOR)); // value
-        state.set_table(-3);
-
-        Ok(())
-    }
-
-    fn set_color(state: &mut lua::State, name: &str, color: Color) -> lua::Result<()> {
-        let mut state = lua::state::StackGuard::new(state);
-
-        state.create_table(0, 3); // create a table for 3 records
-        set_color_field(&mut state, "red", color.0)?;
-        set_color_field(&mut state, "green", color.1)?;
-        set_color_field(&mut state, "blue", color.2)?;
-
-        state.set_global(name) // 'name' = table
-    }
-
     impl Config {
         pub fn open<P: AsRef<Path>>(path: P, state: &mut lua::State) -> lua::Result<Self> {
             let mut state = lua::state::StackGuard::new(state);
@@ -93,10 +84,6 @@ mod config {
             let mut file = File::open(path)?;
             let mut buf = Vec::with_capacity(1_024);
             file.read_to_end(&mut buf)?;
-
-            for (name, red, green, blue) in COLOR_TABLE.iter().cloned() {
-                set_color(&mut state, name, Color(red, green, blue))?;
-            }
 
             state.load_string(buf)?;
             state.pcall(0, 0, 0)?;
@@ -120,14 +107,18 @@ mod config {
     }
 }
 
-fn main() -> lua::Result<()> {
+fn main() {
     env_logger::init();
 
     let mut state = lua::State::new();
     state.open_libs();
 
-    let config = config::Config::open("examples/extend.lua", &mut state)?;
-    println!("config = {:?}", config);
-
-    Ok(())
+    match config::Config::open("examples/extend.lua", &mut state) {
+        Ok(config) => {
+            println!("config = {:?}", config);
+        }
+        Err(error) => {
+            eprintln!("Error: {}", error);
+        }
+    }
 }
