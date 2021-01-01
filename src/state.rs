@@ -507,8 +507,50 @@ impl State {
     /// Pushes onto the stack the value of the global name. Returns the type of that value.
     pub fn get_global<T: Into<Vec<u8>>>(&mut self, name: T) -> Result<i32> {
         let name = CString::new(name)?;
-        let tp = unsafe { ffi::lua_getglobal(self.as_ptr(), name.as_ptr()) };
-        Ok(tp)
+        Ok(unsafe { ffi::lua_getglobal(self.as_ptr(), name.as_ptr()) })
+    }
+
+    pub fn set_global<T: Into<Vec<u8>>>(&mut self, name: T) -> Result<()> {
+        let name = CString::new(name)?;
+        Ok(unsafe { ffi::lua_setglobal(self.as_ptr(), name.as_ptr()) })
+    }
+
+    /// Pushes onto the stack the value `t[k]`, where `t` is the value at the given index and `k` is
+    /// the value on the top of the stack.
+    /// 
+    /// This methods pops the key from the stack, pushing the resulting value in its place. As in 
+    /// Lua, this function may trigger a metamethod for the "index" event (see [`§2.4`]).
+    /// 
+    /// Returns the type of the pushed value.
+    ///
+    /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
+    pub fn get_table(&mut self, index: i32) -> i32 {
+        unsafe { ffi::lua_gettable(self.as_ptr(), index) }
+    }
+
+    /// Does the equivalent to `t[k] = v`, where `t` is the value at the given index, `v` is the
+    /// value on the top of the stack, and `k` is the value just below the top.
+    /// 
+    /// This function pops both the key and the value from the stack. As in Lua, this function may 
+    /// trigger a metamethod for the "newindex" event (see [`§2.4`]).
+    ///
+    /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
+    pub fn set_table(&mut self, index: i32) {
+        unsafe { ffi::lua_settable(self.as_ptr(), index) }
+    }
+
+    /// Creates a new empty table and pushes it onto the stack.
+    pub fn new_table(&mut self) {
+        unsafe { ffi::lua_newtable(self.as_ptr()) }
+    }
+
+    /// Creates a new empty table and pushes it onto the stack. Parameter `narr` is a hint for how 
+    /// many elements the table will have as a sequence; parameter `nrec` is a hint for how many
+    /// other elements the table will have. Lua may use these hints to preallocate memory for the 
+    /// new table. This preallocation may help performance when you know in advance how many elements 
+    /// the table will have. Otherwise you can use [`.new_table()`](State::new_table).
+    pub fn create_table(&mut self, narr: i32, nrec: i32) {
+        unsafe { ffi::lua_createtable(self.as_ptr(), narr, nrec) }
     }
 }
 
@@ -603,6 +645,7 @@ impl<'a> Iterator for Dump<'a> {
 /// creation and when it gets out of scope will pop the elements above this low watermark. When the
 /// stack size is below the low watermark it logs an error and terminates the process in an abnormal
 /// fashion.
+#[derive(Debug)]
 pub struct StackGuard<'a> {
     mark: i32,
     state: &'a mut State,
@@ -625,10 +668,10 @@ impl<'a> Drop for StackGuard<'a> {
     fn drop(&mut self) {
         let top = self.state.top();
         if self.mark < top {
-            debug!("popping {} elements from the stack", top - self.mark);
+            debug!("[StackGuard] popping {} element(s)", top - self.mark);
             self.state.set_top(self.mark);
         } else if self.mark > top {
-            error!("stack size ({}) under low watermark ({})", top, self.mark);
+            error!("[StackGuard] size ({}) under low watermark ({})", top, self.mark);
             std::process::abort()
         }
     }
@@ -643,6 +686,18 @@ impl<'a> Deref for StackGuard<'a> {
 
 impl<'a> DerefMut for StackGuard<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}
+
+impl<'a> AsRef<State> for StackGuard<'a> {
+    fn as_ref(&self) -> &State {
+        &(*self.state)
+    }
+}
+
+impl<'a> AsMut<State> for StackGuard<'a> {
+    fn as_mut(&mut self) -> &mut State {
         &mut self.state
     }
 }
