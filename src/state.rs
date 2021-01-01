@@ -405,7 +405,7 @@ impl State {
     ///
     /// This can run arbitrary code when removing an index marked as to-be-closed from the stack.
     pub fn pop(&mut self, n: i32) {
-        self.set_top((-1 * n) - 1)
+        unsafe { ffi::lua_pop(self.as_ptr(), n) }
     }
 
     /// Pushes a copy of the element at the given `index` onto the stack.
@@ -435,11 +435,7 @@ impl State {
     /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
     /// stack position.
     pub fn remove(&mut self, index: i32) {
-        // rotate the stack by one position, moving the desired element to the top
-        self.rotate(index, -1);
-
-        // pop that element
-        self.pop(-1);
+        unsafe { ffi::lua_remove(self.as_ptr(), index) }
     }
 
     /// Moves the top element into the given valid `index`, shifting up the elements above this
@@ -450,20 +446,13 @@ impl State {
     /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
     /// stack position.
     pub fn insert(&mut self, index: i32) {
-        // move the top element into the given position, shifting up the elements
-        // above this position to open space
-        self.rotate(index, 1)
+        unsafe { ffi::lua_insert(self.as_ptr(), index)}
     }
 
     /// Moves the top element into the given valid `index` without shifting any element (therefore
-    //// replacing the value at that given `index`), and then pops the top element.
+    /// replacing the value at that given `index`), and then pops the top element.
     pub fn replace(&mut self, index: i32) {
-        // move the top element into the given valid `index` without shifting
-        // any element
-        self.copy(-1, index);
-
-        // pop the top element
-        self.pop(1);
+        unsafe { ffi::lua_replace(self.as_ptr(), index) }
     }
 
     /// Copies the element at index `fromidx` into the valid index `toidx`, replacing the value at
