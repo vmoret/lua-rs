@@ -2,6 +2,7 @@
 use std::{
     ffi::{CStr, CString},
     fmt,
+    ops::{Deref, DerefMut},
     ptr::{null, NonNull},
 };
 
@@ -446,7 +447,7 @@ impl State {
     /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
     /// stack position.
     pub fn insert(&mut self, index: i32) {
-        unsafe { ffi::lua_insert(self.as_ptr(), index)}
+        unsafe { ffi::lua_insert(self.as_ptr(), index) }
     }
 
     /// Moves the top element into the given valid `index` without shifting any element (therefore
@@ -561,5 +562,53 @@ impl<'a> Iterator for Dump<'a> {
     type Item = Info<'a>;
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(idx, _, state)| state.info(idx))
+    }
+}
+
+/// A guard on the Lua stack size, that is it sets an expected low watermark for the stack size at
+/// creation and when it gets out of scope will pop the elements above this low watermark. When the
+/// stack size is below the low watermark it logs an error and terminates the process in an abnormal
+/// fashion.
+pub struct StackGuard<'a> {
+    mark: i32,
+    state: &'a mut State,
+}
+
+impl<'a> StackGuard<'a> {
+    /// Creates a new `StackGuard` with the stack size as low watermark.
+    pub fn new(state: &'a mut State) -> Self {
+        let top = state.top();
+        Self::with_mark(top, state)
+    }
+
+    /// Creates a new `StackGuard` for a specified low watermark
+    pub fn with_mark(mark: i32, state: &'a mut State) -> Self {
+        Self { state, mark }
+    }
+}
+
+impl<'a> Drop for StackGuard<'a> {
+    fn drop(&mut self) {
+        let top = self.state.top();
+        if self.mark < top {
+            debug!("popping {} elements from the stack", top - self.mark);
+            self.state.set_top(self.mark);
+        } else if self.mark > top {
+            error!("stack size ({}) under low watermark ({})", top, self.mark);
+            std::process::abort()
+        }
+    }
+}
+
+impl<'a> Deref for StackGuard<'a> {
+    type Target = State;
+    fn deref(&self) -> &Self::Target {
+        &(*self.state)
+    }
+}
+
+impl<'a> DerefMut for StackGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
     }
 }
