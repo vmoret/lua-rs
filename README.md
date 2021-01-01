@@ -9,3 +9,4 @@ manual (4th edition).
 - [Pushing, querying elements and other stack operations](examples/stack.rs)
 - [Getting user information from a configuration file](examples/extend.rs)
 - [Calling Lua Functions](examples/call.rs)
+- [Calling C from Lua](examples/func.rs)

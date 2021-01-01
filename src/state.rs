@@ -1,5 +1,12 @@
 //! Lua state.
-use std::{ffi::{CStr, CString}, fmt, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{null, NonNull}};
+use std::{
+    ffi::{CStr, CString},
+    fmt,
+    marker::PhantomData,
+    mem,
+    ops::{Deref, DerefMut},
+    ptr::{self, null, NonNull},
+};
 
 use crate::{
     alloc,
@@ -7,6 +14,7 @@ use crate::{
     ffi,
 };
 
+use libc::c_void;
 pub use types::*;
 
 pub mod types {
@@ -52,9 +60,22 @@ pub trait Push {
 }
 
 pub trait Pull {
+    fn size() -> i32 {
+        1
+    }
+
     fn pull(state: &State, index: i32) -> Result<Self>
     where
         Self: Sized;
+
+    fn pop(state: &mut State) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let ret = Self::pull(&state, -1);
+        state.pop(Self::size());
+        ret
+    }
 }
 
 macro_rules! impl_primitives {
@@ -130,6 +151,10 @@ macro_rules! impl_tuples {
         }
 
         impl<$($T: Pull),+> Pull for ($($T,)+) {
+            fn size() -> i32 {
+                0 $(+ $T::size())*
+            }
+
             fn pull(state: &State, index: i32) -> Result<Self>
             where
                     Self: Sized {
@@ -164,6 +189,7 @@ impl_tuples! { 12, 0 A 1 B 2 C 3 D 4 E 5 F 6 G 7 H 8 I 9 J 10 K 11 L}
 /// ```
 pub struct State {
     ptr: NonNull<ffi::lua_State>,
+    droppable: bool,
 }
 
 unsafe impl Send for State {}
@@ -221,6 +247,20 @@ impl State {
         let ptr = unsafe { ffi::lua_newstate(alloc::alloc, ud as _) };
         debug!("{:p} new state", ptr);
 
+        Self::from_ptr(ptr, true)
+    }
+
+    /// Gets a mutable pointer to the Lua state pointer.
+    fn as_ptr(&self) -> *mut ffi::lua_State {
+        self.ptr.as_ptr()
+    }
+
+    /// Constructs a new `State`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the ptr is non-null.
+    pub fn from_ptr(ptr: *mut ffi::lua_State, droppable: bool) -> Self {
         // panic when pointer is null, that is when not enough memory could be
         // allocated for the Lua state.
         if ptr.is_null() {
@@ -231,12 +271,7 @@ impl State {
         // is non-null.
         let ptr = unsafe { NonNull::new_unchecked(ptr) };
 
-        Self { ptr }
-    }
-
-    /// Gets a mutable pointer to the Lua state pointer.
-    fn as_ptr(&self) -> *mut ffi::lua_State {
-        self.ptr.as_ptr()
+        Self { ptr, droppable }
     }
 
     /// Opens all standard Lua libraries into the given state.
@@ -271,6 +306,8 @@ impl State {
     }
 
     /// Calls a function (or a callable object) in protected mode.
+    ///
+    /// Always removes the function and its arguments from the stack.
     pub fn pcall(&mut self, nargs: i32, nresults: i32, msgh: i32) -> Result<()> {
         let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
         self.handle_result(code, ())
@@ -328,6 +365,31 @@ impl State {
         unsafe { ffi::lua_pushboolean(self.as_ptr(), b) }
     }
 
+    /// Pushes a new C closure onto the stack. This function receives a pointer to a C function and
+    /// pushes onto the stack a Lua value of type function that, when called, invokes the corresponding
+    /// C function. The parameter n tells how many upvalues this function will have (see [`§4.2`]).
+    ///
+    /// Any function to be callable by Lua must follow the correct protocol to receive its parameters
+    /// and return its results (see [`CFunction`]).
+    ///
+    /// When a C function is created, it is possible to associate some values with it, the so called
+    /// upvalues; these upvalues are then accessible to the function whenever it is called. This
+    /// association is called a C closure (see [`§4.2`]). To create a C closure, first the initial
+    /// values for its upvalues must be pushed onto the stack. (When there are multiple upvalues,
+    /// the first value is pushed first.) Then lua_pushcclosure is called to create and push the C
+    /// function onto the stack, with the argument n telling how many values will be associated with
+    /// the function. lua_pushcclosure also pops these values from the stack.
+    ///
+    /// The maximum value for `n` is 255.
+    ///
+    /// When `n` is zero, this function creates a light C function, which is just a pointer to the C
+    /// function. In that case, it never raises a memory error.
+    ///
+    /// [`§4.2`]: https://www.lua.org/manual/5.4/manual.html#4.2
+    pub fn push_cclosure(&mut self, function: CFunction, n: i32) {
+        unsafe { ffi::lua_pushcclosure(self.as_ptr(), function, n) }
+    }
+
     /// Pushes a C function onto the stack.
     pub fn push_cfunction(&mut self, function: CFunction) {
         unsafe { ffi::lua_pushcfunction(self.as_ptr(), function) }
@@ -335,7 +397,8 @@ impl State {
 
     /// Pushes a float with value `t` onto the stack.
     pub fn push_number<T: Into<f64>>(&mut self, t: T) {
-        unsafe { ffi::lua_pushnumber(self.as_ptr(), t.into()) }
+        let n = t.into();
+        unsafe { ffi::lua_pushnumber(self.as_ptr(), n) }
     }
 
     /// Pushes an integer with value `t` onto the stack.
@@ -503,6 +566,12 @@ impl State {
         } else {
             num_traits::cast(n)
         }
+    }
+
+    /// If the value at the given `index` is a full userdata, returns its memory-block address. If
+    /// the value is a light userdata, returns its value (a pointer). Otherwise, returns NULL.
+    pub fn to_userdata(&self, index: i32) -> *mut c_void {
+        unsafe { ffi::lua_touserdata(self.as_ptr(), index) }
     }
 
     /// Converts the Lua value at the given `index` to a C string.
@@ -687,6 +756,29 @@ impl State {
     pub fn create_table(&mut self, narr: i32, nrec: i32) {
         unsafe { ffi::lua_createtable(self.as_ptr(), narr, nrec) }
     }
+
+    /// This function creates and pushes on the stack a new full userdata, with `nuvalue` associated
+    /// Lua values, called user values, plus an associated block of raw memory with `size` bytes.
+    /// (The user values can be set and read with the functions lua_setiuservalue and lua_getiuservalue.)
+    ///
+    /// The function returns the address of the block of memory. Lua ensures that this address is
+    /// valid as long as the corresponding userdata is alive (see [`§2.5`]). Moreover, if the
+    /// userdata is marked for finalization (see [`§2.5.3`]), its address is valid at least until the
+    /// call to its finalizer.
+    ///
+    /// [`§2.5`]: https://www.lua.org/manual/5.4/manual.html#2.5
+    /// [`§2.5.3`]: https://www.lua.org/manual/5.4/manual.html#2.5.3
+    pub fn new_userdata(&mut self, size: usize, nuvalue: i32) -> *mut c_void {
+        unsafe { ffi::lua_newuserdatauv(self.as_ptr(), size, nuvalue) }
+    }
+
+    /// Returns the pseudo-index that represents the `i`-th upvalue of the running function (see
+    /// [`§4.2`]). `i` must be in the range [1,256].
+    ///
+    /// [`§4.2`]: https://www.lua.org/manual/5.4/manual.html#2.5
+    pub fn upvalue_index(&self, i: i32) -> i32 {
+        ffi::lua_upvalueindex(i)
+    }
 }
 
 impl Default for State {
@@ -697,6 +789,9 @@ impl Default for State {
 
 impl Drop for State {
     fn drop(&mut self) {
+        if !self.droppable {
+            return;
+        }
         debug!("{:p} drop state", self.ptr);
         unsafe {
             // SAFETY: This unsafety is ok becuase while this `State` is alive
@@ -850,7 +945,11 @@ pub struct Function<'a, Args, Output> {
 impl<'a, Args, Output> Function<'a, Args, Output> {
     /// Creates a new `Function` for given state and global name.
     pub fn new(state: &'a mut State, name: &'a str) -> Self {
-        Self { state, name, _marker: PhantomData }
+        Self {
+            state,
+            name,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -858,7 +957,7 @@ impl<'a, Args: Push, Output: Pull> FnOnce<Args> for Function<'a, Args, Output> {
     type Output = Result<Output>;
     extern "rust-call" fn call_once(self, args: Args) -> Self::Output {
         let mut state = StackGuard::new(self.state);
-        
+
         // push functions and arguments
         state.get_global(self.name)?; // push function
         let nargs = args.push(&mut state)?;
@@ -868,5 +967,71 @@ impl<'a, Args: Push, Output: Pull> FnOnce<Args> for Function<'a, Args, Output> {
 
         // retrieve the result(s)
         Output::pull(&state, -1)
+    }
+}
+
+/// A Rust function wrapper.
+pub struct RustFunction<F, Args, Output> {
+    func: F,
+    _marker: PhantomData<(Args, Output)>,
+}
+
+impl<F, Args, Output> RustFunction<F, Args, Output> {
+    /// Creates a new `RustFunction` wrapping specified func.
+    pub fn new(func: F) -> Self {
+        Self {
+            func,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<F, Args, Output> Push for RustFunction<F, Args, Output>
+where
+    F: Fn(Args) -> Result<Output>,
+    Args: Pull,
+    Output: Push,
+{
+    fn push(&self, state: &mut State) -> Result<i32> {
+        unsafe {
+            let wrapped = wrapper::<Output, Args, F>;
+
+            let ud = state.new_userdata(mem::size_of::<F>(), 1);
+            let func: &mut F = mem::transmute(ud);
+            ptr::copy(&self.func, func, 1);
+
+            state.push_cclosure(wrapped, 1);
+        }
+        Ok(1)
+    }
+}
+
+unsafe extern "C" fn wrapper<Output, Args, F>(ptr: *mut ffi::lua_State) -> i32
+where
+    F: Fn(Args) -> Result<Output>,
+    Args: Pull,
+    Output: Push,
+{
+    let mut state = State::from_ptr(ptr, false);
+
+    let idx = state.upvalue_index(1);
+    let func: &mut F = mem::transmute(state.to_userdata(idx));
+
+    let ret = Args::pop(&mut state)
+        .and_then(|args| func(args))
+        .and_then(|output| output.push(&mut state));
+
+    match ret {
+        Ok(n) => {
+            debug!("successfully called Lua function, {} element(s) pushed", n);
+            n // number of results
+        }
+        Err(error) => {
+            error!("failure calling Lua function, {}", error);
+            if let Err(e) = state.push_string(error.to_string()) {
+                error!("failed to push error string, {}", e);
+            }
+            ffi::LUA_ERRRUN
+        }
     }
 }
