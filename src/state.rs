@@ -503,6 +503,13 @@ impl State {
     pub fn dump(&self) -> Dump<'_> {
         Dump { iter: self.iter() }
     }
+
+    /// Pushes onto the stack the value of the global name. Returns the type of that value.
+    pub fn get_global<T: Into<Vec<u8>>>(&mut self, name: T) -> Result<i32> {
+        let name = CString::new(name)?;
+        let tp = unsafe { ffi::lua_getglobal(self.as_ptr(), name.as_ptr()) };
+        Ok(tp)
+    }
 }
 
 impl Default for State {
