@@ -372,24 +372,24 @@ impl State {
     }
 
     /// Converts the Lua value at the given `index` to a signed integer.
-    pub fn to_integer<T: From<i64>>(&self, index: i32) -> Option<T> {
+    pub fn to_integer<T: num_traits::NumCast>(&self, index: i32) -> Option<T> {
         let mut isnum = 0;
         let n = unsafe { ffi::lua_tointegerx(self.as_ptr(), index, &mut isnum) };
         if isnum == 0 {
             None
         } else {
-            Some(n.into())
+            num_traits::cast(n)
         }
     }
 
     /// Converts the Lua value at the given `index` to a float.
-    pub fn to_number<T: From<f64>>(&self, index: i32) -> Option<T> {
+    pub fn to_number<T: num_traits::NumCast>(&self, index: i32) -> Option<T> {
         let mut isnum = 0;
         let n = unsafe { ffi::lua_tonumberx(self.as_ptr(), index, &mut isnum) };
         if isnum == 0 {
             None
         } else {
-            Some(n.into())
+            num_traits::cast(n)
         }
     }
 

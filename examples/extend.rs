@@ -6,12 +6,10 @@ extern crate lua;
 mod config {
     use std::{fs::File, path::Path, io::Read};
 
-    use crate::get_global_integer;
-
     #[derive(Debug)]
     pub struct Config {
-        width: i64,
-        height: i64,
+        width: u16,
+        height: u16,
     }
     
     impl Config {
@@ -24,21 +22,21 @@ mod config {
             state.pcall(0, 0, 0)?;
 
             Ok(Self {
-                width: get_global_integer(state, "width")?,
-                height: get_global_integer(state, "height")?,
+                width: get_global_u16(state, "width")?,
+                height: get_global_u16(state, "height")?,
             })
         }
     }
-}
 
-fn get_global_integer(state: &mut lua::State, name: &str) -> lua::Result<i64> {
-    state.get_global(name)?;
-    state.to_integer(-1).ok_or_else(|| {
-        // remove result from the stack
-        state.pop(1);
-
-        lua::Error::new(lua::ErrorKind::InvalidInput, format!("{:?} should be a number", name))
-    })
+    fn get_global_u16(state: &mut lua::State, name: &str) -> lua::Result<u16> {
+        state.get_global(name)?;
+        state.to_integer(-1).ok_or_else(|| {
+            // remove result from the stack
+            state.pop(1);
+    
+            lua::Error::new(lua::ErrorKind::InvalidInput, format!("{:?} should be a number", name))
+        })
+    }
 }
 
 fn main() -> lua::Result<()> {
