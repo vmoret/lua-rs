@@ -42,6 +42,7 @@ mod config {
 fn main() -> lua::Result<()> {
 
     let mut state = lua::State::new();
+    state.open_libs();
 
     let config = config::Config::open("examples/extend.lua", &mut state)?;
     println!("config = {:?}", config);
