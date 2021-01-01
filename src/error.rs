@@ -82,4 +82,12 @@ macro_rules! impl_from_errors {
     )*};
 }
 
-impl_from_errors!((std::ffi::NulError, std::io::Error, std::str::Utf8Error), InvalidData);
+impl_from_errors!(
+    (
+        std::ffi::NulError,
+        std::io::Error,
+        std::str::Utf8Error,
+        std::string::FromUtf8Error
+    ),
+    InvalidData
+);

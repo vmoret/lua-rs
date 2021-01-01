@@ -1,10 +1,5 @@
 //! Lua state.
-use std::{
-    ffi::{CStr, CString},
-    fmt,
-    ops::{Deref, DerefMut},
-    ptr::{null, NonNull},
-};
+use std::{ffi::{CStr, CString}, fmt, marker::PhantomData, ops::{Deref, DerefMut}, ptr::{null, NonNull}};
 
 use crate::{
     alloc,
@@ -50,6 +45,112 @@ pub mod types {
 }
 
 pub type CFunction = unsafe extern "C" fn(*mut ffi::lua_State) -> i32;
+
+pub trait Push {
+    /// Pushes the value `p` onto the stack and returns the number of slots used.
+    fn push(&self, state: &mut State) -> Result<i32>;
+}
+
+pub trait Pull {
+    fn pull(state: &State, index: i32) -> Result<Self>
+    where
+        Self: Sized;
+}
+
+macro_rules! impl_primitives {
+    ([$($ty:ty),*], $push:ident, $pull:ident) => {$(
+        impl Push for $ty {
+            fn push(&self, state: &mut State) -> Result<i32> {
+                state.$push(*self);
+                Ok(1)
+            }
+        }
+        impl Pull for $ty {
+            fn pull(state: &State, index: i32) -> Result<Self> {
+                state.$pull(index).ok_or(Error::new(ErrorKind::InvalidData, "invalid number"))
+            }
+        }
+    )*};
+}
+
+impl_primitives!([i64, i32, i16, i8, u32, u16, u8], push_integer, to_integer);
+impl_primitives!([f64, f32], push_number, to_number);
+
+impl Push for bool {
+    fn push(&self, state: &mut State) -> Result<i32> {
+        state.push_boolean(*self);
+        Ok(1)
+    }
+}
+
+impl Pull for bool {
+    fn pull(state: &State, index: i32) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(state.to_boolean(index))
+    }
+}
+
+impl Push for &[u8] {
+    fn push(&self, state: &mut State) -> Result<i32> {
+        state.push_string(*self)?;
+        Ok(1)
+    }
+}
+
+impl Pull for Vec<u8> {
+    fn pull(state: &State, index: i32) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(state.as_bytes(index).to_vec())
+    }
+}
+
+impl Pull for String {
+    fn pull(state: &State, index: i32) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let vec = state.as_bytes(index).to_vec();
+        let s = String::from_utf8(vec)?;
+        Ok(s)
+    }
+}
+
+macro_rules! impl_tuples {
+    ($len:tt, $($idx:tt $T:ident)+) => {
+        impl<$($T: Push),+> Push for ($($T,)+) {
+            fn push(&self, state: &mut State) -> Result<i32> {
+                let mut n = 0;
+                $(n += self.$idx.push(&mut *state)?;)+
+                Ok(n)
+            }
+        }
+
+        impl<$($T: Pull),+> Pull for ($($T,)+) {
+            fn pull(state: &State, index: i32) -> Result<Self>
+            where
+                    Self: Sized {
+                Ok(($($T::pull(&*state, index - ($len - 1) + $idx)?,)+))
+            }
+        }
+    };
+}
+
+impl_tuples! { 1, 0 A }
+impl_tuples! { 2, 0 A 1 B }
+impl_tuples! { 3, 0 A 1 B 2 C}
+impl_tuples! { 4, 0 A 1 B 2 C 3 D}
+impl_tuples! { 5, 0 A 1 B 2 C 3 D 4 E}
+impl_tuples! { 6, 0 A 1 B 2 C 3 D 4 E 5 F}
+impl_tuples! { 7, 0 A 1 B 2 C 3 D 4 E 5 F 6 G}
+impl_tuples! { 8, 0 A 1 B 2 C 3 D 4 E 5 F 6 G 7 H}
+impl_tuples! { 9, 0 A 1 B 2 C 3 D 4 E 5 F 6 G 7 H 8 I}
+impl_tuples! { 10, 0 A 1 B 2 C 3 D 4 E 5 F 6 G 7 H 8 I 9 J}
+impl_tuples! { 11, 0 A 1 B 2 C 3 D 4 E 5 F 6 G 7 H 8 I 9 J 10 K}
+impl_tuples! { 12, 0 A 1 B 2 C 3 D 4 E 5 F 6 G 7 H 8 I 9 J 10 K 11 L}
 
 /// A Lua state.
 ///
@@ -191,13 +292,19 @@ impl State {
     }
 
     /// Pushes the C function on the call and call it in protected mode.
-    pub fn call_secure(&mut self, nargs: i32, nresults: i32, msgh: i32, function: CFunction) -> Result<()> {
+    pub fn call_secure(
+        &mut self,
+        nargs: i32,
+        nresults: i32,
+        msgh: i32,
+        function: CFunction,
+    ) -> Result<()> {
         self.push_cfunction(function);
         self.pcall(nargs, nresults, msgh)
     }
 
     /// Raises a Lua error, using the value on the top of the stack as the error object.
-    /// 
+    ///
     /// This underlying C function does a long jump, and therefore never returns
     pub fn raise_error<E>(&mut self, error: E) -> !
     where
@@ -258,6 +365,11 @@ impl State {
             std::slice::from_raw_parts(data, len)
         };
         Ok(s)
+    }
+
+    /// Pushes the value `p` onto the stack and returns the number of slots used.
+    pub fn push<T: Push>(&mut self, t: T) -> Result<i32> {
+        t.push(self)
     }
 
     /// Ensures that the stack has space for at least `n` extra elements, that is, that you can
@@ -517,10 +629,10 @@ impl State {
 
     /// Pushes onto the stack the value `t[k]`, where `t` is the value at the given index and `k` is
     /// the value on the top of the stack.
-    /// 
-    /// This methods pops the key from the stack, pushing the resulting value in its place. As in 
+    ///
+    /// This methods pops the key from the stack, pushing the resulting value in its place. As in
     /// Lua, this function may trigger a metamethod for the "index" event (see [`§2.4`]).
-    /// 
+    ///
     /// Returns the type of the pushed value.
     ///
     /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
@@ -530,7 +642,7 @@ impl State {
 
     /// Pushes onto the stack the value `t[k]`, where `t` is the value at the given `index`. As in
     /// Lua, this function may trigger a metamethod for the "index" event (see [`§2.4`]).
-    /// 
+    ///
     /// Returns the type of the pushed value.
     ///
     /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
@@ -541,8 +653,8 @@ impl State {
 
     /// Does the equivalent to `t[k] = v`, where `t` is the value at the given index, `v` is the
     /// value on the top of the stack, and `k` is the value just below the top.
-    /// 
-    /// This function pops both the key and the value from the stack. As in Lua, this function may 
+    ///
+    /// This function pops both the key and the value from the stack. As in Lua, this function may
     /// trigger a metamethod for the "newindex" event (see [`§2.4`]).
     ///
     /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
@@ -552,7 +664,7 @@ impl State {
 
     /// Does the equivalent to `t[k] = v`, where `t` is the value at the given `index` and `v` is
     /// the value on the top of the stack.
-    /// 
+    ///
     /// This function pops the value from the stack. As in Lua, this function may trigger a
     /// metamethod for the "newindex" event (see [`§2.4`]).
     ///
@@ -567,10 +679,10 @@ impl State {
         unsafe { ffi::lua_newtable(self.as_ptr()) }
     }
 
-    /// Creates a new empty table and pushes it onto the stack. Parameter `narr` is a hint for how 
+    /// Creates a new empty table and pushes it onto the stack. Parameter `narr` is a hint for how
     /// many elements the table will have as a sequence; parameter `nrec` is a hint for how many
-    /// other elements the table will have. Lua may use these hints to preallocate memory for the 
-    /// new table. This preallocation may help performance when you know in advance how many elements 
+    /// other elements the table will have. Lua may use these hints to preallocate memory for the
+    /// new table. This preallocation may help performance when you know in advance how many elements
     /// the table will have. Otherwise you can use [`.new_table()`](State::new_table).
     pub fn create_table(&mut self, narr: i32, nrec: i32) {
         unsafe { ffi::lua_createtable(self.as_ptr(), narr, nrec) }
@@ -694,7 +806,10 @@ impl<'a> Drop for StackGuard<'a> {
             debug!("[StackGuard] popping {} element(s)", top - self.mark);
             self.state.set_top(self.mark);
         } else if self.mark > top {
-            error!("[StackGuard] size ({}) under low watermark ({})", top, self.mark);
+            error!(
+                "[StackGuard] size ({}) under low watermark ({})",
+                top, self.mark
+            );
             std::process::abort()
         }
     }
@@ -722,5 +837,36 @@ impl<'a> AsRef<State> for StackGuard<'a> {
 impl<'a> AsMut<State> for StackGuard<'a> {
     fn as_mut(&mut self) -> &mut State {
         &mut self.state
+    }
+}
+
+/// A function defined in Lua.
+pub struct Function<'a, Args, Output> {
+    state: &'a mut State,
+    name: &'a str,
+    _marker: PhantomData<(Args, Output)>,
+}
+
+impl<'a, Args, Output> Function<'a, Args, Output> {
+    /// Creates a new `Function` for given state and global name.
+    pub fn new(state: &'a mut State, name: &'a str) -> Self {
+        Self { state, name, _marker: PhantomData }
+    }
+}
+
+impl<'a, Args: Push, Output: Pull> FnOnce<Args> for Function<'a, Args, Output> {
+    type Output = Result<Output>;
+    extern "rust-call" fn call_once(self, args: Args) -> Self::Output {
+        let mut state = StackGuard::new(self.state);
+        
+        // push functions and arguments
+        state.get_global(self.name)?; // push function
+        let nargs = args.push(&mut state)?;
+
+        // do the call (2 arguments, 1 result)
+        state.pcall(nargs, ffi::LUA_MULTRET, 0)?;
+
+        // retrieve the result(s)
+        Output::pull(&state, -1)
     }
 }
