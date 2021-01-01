@@ -49,6 +49,8 @@ pub mod types {
     pub const LUA_TLIGHTUSERDATA: i32 = ffi::LUA_TLIGHTUSERDATA;
 }
 
+pub type CFunction = unsafe extern "C" fn(*mut ffi::lua_State) -> i32;
+
 /// A Lua state.
 ///
 /// # Examples
@@ -188,6 +190,26 @@ impl State {
         }
     }
 
+    /// Pushes the C function on the call and call it in protected mode.
+    pub fn call_secure(&mut self, nargs: i32, nresults: i32, msgh: i32, function: CFunction) -> Result<()> {
+        self.push_cfunction(function);
+        self.pcall(nargs, nresults, msgh)
+    }
+
+    /// Raises a Lua error, using the value on the top of the stack as the error object.
+    /// 
+    /// This underlying C function does a long jump, and therefore never returns
+    pub fn raise_error<E>(&mut self, error: E) -> !
+    where
+        E: Into<Box<dyn std::error::Error>>,
+    {
+        let error = error.into().to_string();
+        if let Err(e) = self.push_string(error) {
+            error!("failed to push error string to the stack, {}", e);
+        }
+        unsafe { ffi::lua_error(self.as_ptr()) }
+    }
+
     /// Pushes a **nil** value onto the stack.
     pub fn push_nil(&mut self) {
         unsafe { ffi::lua_pushnil(self.as_ptr()) }
@@ -197,6 +219,11 @@ impl State {
     pub fn push_boolean<T: Into<bool>>(&mut self, t: T) {
         let b = if t.into() { 1 } else { 0 };
         unsafe { ffi::lua_pushboolean(self.as_ptr(), b) }
+    }
+
+    /// Pushes a C function onto the stack.
+    pub fn push_cfunction(&mut self, function: CFunction) {
+        unsafe { ffi::lua_pushcfunction(self.as_ptr(), function) }
     }
 
     /// Pushes a float with value `t` onto the stack.
