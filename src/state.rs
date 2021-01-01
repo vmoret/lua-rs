@@ -1,20 +1,22 @@
 //! Lua state.
-use std::{cell::Cell, ffi::{CStr, CString}, fmt, ptr::{NonNull, null}};
+use std::{
+    ffi::{CStr, CString},
+    fmt,
+    ptr::{null, NonNull},
+};
 
-use crate::{alloc, error::{Error, ErrorKind, Result}, ffi};
+use crate::{
+    alloc,
+    error::{Error, ErrorKind, Result},
+    ffi,
+};
 
 pub use types::*;
-
-/// A soft limit on the amount of references that may be made to a `State`.
-///
-/// Going above this limit will abort your program (although not
-/// necessarily) at _exactly_ `MAX_REFCOUNT + 1` references.
-const MAX_REFCOUNT: usize = (isize::MAX) as usize;
 
 pub mod types {
     use super::ffi;
 
-    /// The type returned by [`Stack::value_type`](crate::Stack::value_type) when a non-valid but 
+    /// The type returned by [`Stack::value_type`](crate::Stack::value_type) when a non-valid but
     /// acceptable index was provided.
     pub const LUA_TNONE: i32 = ffi::LUA_TNONE;
 
@@ -45,60 +47,8 @@ pub mod types {
     /// The *light user data* value type.
     pub const LUA_TLIGHTUSERDATA: i32 = ffi::LUA_TLIGHTUSERDATA;
 }
-// This is repr(C) to future-proof against possible field-reordering.
-#[repr(C)]
-struct StateBox {
-    rc: Cell<usize>,
-    ptr: NonNull<ffi::lua_State>,
-}
-
-impl fmt::Pointer for StateBox {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Pointer::fmt(&self.ptr.as_ptr(), f)
-    }
-}
-
-impl StateBox {
-    fn count(&self) -> usize {
-        self.rc.get()
-    }
-
-    fn inc_count(&self) {
-        let count = self.count();
-
-        // We want to abort on overflow instead of dropping the value.
-        // The reference count will never be zero when this is called;
-        // nevertheless, we insert an abort here to hint LLVM at
-        // an otherwise missed optimization.
-        if count == 0 || count == MAX_REFCOUNT {
-            std::process::abort();
-        }
-        self.rc.set(count + 1);
-        trace!("State({:p}) increased ref counter to {}", self, self.rc.get());
-    }
-
-    fn dec_count(&self) {
-        self.rc.set(self.count() - 1);
-        trace!("State({:p}) decreased ref counter to {}", self, self.rc.get());
-    }
-}
-
-impl Drop for StateBox {
-    fn drop(&mut self) {
-        debug!("{:p} close", self.ptr.as_ptr());
-        unsafe { 
-            // Close all active to-be-closed variables in the main thread, release all objects in 
-            // the given Lua state (calling the corresponding garbage-collection metamethods, if
-            // any), and frees all dynamic memory used by this state.
-            ffi::lua_close(self.ptr.as_ptr())
-        }
-    }
-}
 
 /// A Lua state.
-///
-/// This is a single-threaded reference-counting pointer for a C `lua_State` structure, ensuring
-/// that the Lua state is closed when, and only when, all references are dropped.
 ///
 /// # Examples
 ///
@@ -109,25 +59,29 @@ impl Drop for StateBox {
 /// let state = State::default();
 /// ```
 pub struct State {
-    ptr: *mut StateBox,
+    ptr: NonNull<ffi::lua_State>,
 }
 
 unsafe impl Send for State {}
 
 impl fmt::Debug for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "State({:p})", self.inner().ptr)
+        write!(f, "State({:p})", self.ptr)
     }
 }
 
 impl fmt::Pointer for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Pointer::fmt(&self.inner().ptr, f)
+        fmt::Pointer::fmt(&self.ptr, f)
     }
 }
 
 impl State {
     /// Creates a new `State` without a memory limit.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the ptr is non-null.
     ///
     /// # Examples
     ///
@@ -143,6 +97,10 @@ impl State {
 
     /// Constructs a new `State` with the specified memory limit.
     ///
+    /// # Panics
+    ///
+    /// Panics when the ptr is non-null.
+    ///
     /// # Examples
     ///
     /// ```
@@ -152,21 +110,29 @@ impl State {
     /// let state = State::with_limit(8 * 1_024);
     /// ```
     pub fn with_limit(limit: usize) -> Self {
-        let ptr = new_state_unchecked(limit);
-        let b = box StateBox { ptr, rc: Cell::new(1) };
-        let ptr = Box::into_raw(b);
-        Self { ptr }
-    }
+        // initialize Lua user data
+        let ud = Box::into_raw(box alloc::MemoryInfo::new(limit));
 
-    fn inner(&self) -> &StateBox {
-        // SAFETY: This unsafety is ok because while this `State` is alive we're
-        // guaranteed that the inner pointer is valid.
-        unsafe { &(*self.ptr) }
+        // initialize raw Lua state
+        let ptr = unsafe { ffi::lua_newstate(alloc::alloc, ud as _) };
+        debug!("{:p} new state", ptr);
+
+        // panic when pointer is null, that is when not enough memory could be
+        // allocated for the Lua state.
+        if ptr.is_null() {
+            panic!("failed to allocate enough memory for a Lua state");
+        }
+
+        // SAFETY: This unsafety is ok becuase the pointer is already checked and
+        // is non-null.
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+
+        Self { ptr }
     }
 
     /// Gets a mutable pointer to the Lua state pointer.
     fn as_ptr(&self) -> *mut ffi::lua_State {
-        self.inner().ptr.as_ptr()
+        self.ptr.as_ptr()
     }
 
     /// Opens all standard Lua libraries into the given state.
@@ -186,7 +152,7 @@ impl State {
 
     /// Loads a string as a Lua chunk. This function uses [`.load()`] to load the chunk in the
     /// provided data.
-    /// 
+    ///
     /// This function returns the same results as [`.load()`].
     ///
     /// Also as [`.load()`], this function only loads the chunk; it does not run it.
@@ -204,13 +170,6 @@ impl State {
     pub fn pcall(&mut self, nargs: i32, nresults: i32, msgh: i32) -> Result<()> {
         let code = unsafe { ffi::lua_pcall(self.as_ptr(), nargs, nresults, msgh) };
         self.handle_result(code, ())
-    }
-
-    /// Pops n elements from the stack.
-    /// 
-    /// This can run arbitrary code when removing an index marked as to-be-closed from the stack.
-    pub fn pop(&mut self, n: i32) {
-        unsafe { ffi::lua_pop(self.as_ptr(), n) }
     }
 
     /// Returns a [`Result<T>`](crate::error::Result) based on provided result `code`.
@@ -250,7 +209,7 @@ impl State {
     }
 
     /// Pushes the string `s` onto the stack.
-    /// 
+    ///
     /// Lua will make or reuse an internal copy of the given string, so the memory at `s` can be
     /// freed or reused immediately after the function returns. The string can contain any binary
     /// data, including embedded zeros.
@@ -261,7 +220,10 @@ impl State {
         let s = unsafe {
             let cs = ffi::lua_pushlstring(self.as_ptr(), s.as_ptr() as *const i8, s.len());
             if cs.is_null() {
-                return Err(Error::new(ErrorKind::InvalidData, "unexpected NULL while pushing string"));
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "unexpected NULL while pushing string",
+                ));
             }
             let len = libc::strlen(cs);
             let data = cs as *const u8;
@@ -350,7 +312,7 @@ impl State {
     pub fn is_table(&self, index: i32) -> bool {
         unsafe { ffi::lua_istable(self.as_ptr(), index) != 0 }
     }
-    
+
     /// Returns `true` if the value at the given `index` is a thread.
     pub fn is_thread(&self, index: i32) -> bool {
         unsafe { ffi::lua_isthread(self.as_ptr(), index) != 0 }
@@ -405,11 +367,10 @@ impl State {
 
     /// Converts the Lua value at the given `index` to a C string.
     pub fn as_c_str<'a>(&'a self, index: i32) -> &'a CStr {
-        unsafe {
-            CStr::from_ptr(ffi::lua_tostring(self.as_ptr(), index))
-        }
+        unsafe { CStr::from_ptr(ffi::lua_tostring(self.as_ptr(), index)) }
     }
 
+    /// Returns the [`Info`] of the stack element at the given `index`.
     pub fn info(&self, idx: i32) -> Info<'_> {
         unsafe {
             let state = self.as_ptr();
@@ -430,10 +391,95 @@ impl State {
         unsafe { ffi::lua_gettop(self.as_ptr()) }
     }
 
+    /// Accepts any `index`, or 0, and sets the stack top to this `index`. If the new top is greater
+    /// than the old one, then the new elements are filled with **nil**. If `index` is 0, then all
+    /// stack elements are removed.
+    ///
+    /// This function can run arbitrary code when removing an index marked as to-be-closed from the
+    /// stack.
+    pub fn set_top(&mut self, index: i32) {
+        unsafe { ffi::lua_settop(self.as_ptr(), index) }
+    }
+
+    /// Pops n elements from the stack.
+    ///
+    /// This can run arbitrary code when removing an index marked as to-be-closed from the stack.
+    pub fn pop(&mut self, n: i32) {
+        self.set_top((-1 * n) - 1)
+    }
+
+    /// Pushes a copy of the element at the given `index` onto the stack.
+    pub fn push_value(&mut self, index: i32) {
+        unsafe { ffi::lua_pushvalue(self.as_ptr(), index) }
+    }
+
+    /// Rotates the stack elements between the valid index idx and the top of the stack.
+    ///
+    /// The elements are rotated `n` positions in the direction of the top, for a positive `n`, or
+    /// `-n` positions in the direction of the bottom, for a negative `n`. The absolute value of `n`
+    /// must not be greater than the size of the slice being rotated.
+    ///
+    /// ## Pseudo-index support
+    ///
+    /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
+    /// stack position.
+    pub fn rotate(&mut self, index: i32, n: i32) {
+        unsafe { ffi::lua_rotate(self.as_ptr(), index, n) }
+    }
+
+    /// Removes the element at the given valid `index`, shifting down the elements above this `index`
+    /// to fill the gap.
+    ///
+    /// ## Pseudo-index support
+    ///
+    /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
+    /// stack position.
+    pub fn remove(&mut self, index: i32) {
+        // rotate the stack by one position, moving the desired element to the top
+        self.rotate(index, -1);
+
+        // pop that element
+        self.pop(-1);
+    }
+
+    /// Moves the top element into the given valid `index`, shifting up the elements above this
+    /// `index` to open space.
+    ///
+    /// ## Pseudo-index support
+    ///
+    /// This function cannot be called with a pseudo-index, because a pseudo-index is not an actual
+    /// stack position.
+    pub fn insert(&mut self, index: i32) {
+        // move the top element into the given position, shifting up the elements
+        // above this position to open space
+        self.rotate(index, 1)
+    }
+
+    /// Moves the top element into the given valid `index` without shifting any element (therefore
+    //// replacing the value at that given `index`), and then pops the top element.
+    pub fn replace(&mut self, index: i32) {
+        // move the top element into the given valid `index` without shifting
+        // any element
+        self.copy(-1, index);
+
+        // pop the top element
+        self.pop(1);
+    }
+
+    /// Copies the element at index `fromidx` into the valid index `toidx`, replacing the value at
+    /// that position. Values at other positions are not affected.
+    pub fn copy(&mut self, fromidx: i32, toidx: i32) {
+        unsafe { ffi::lua_copy(self.as_ptr(), fromidx, toidx) }
+    }
+
     /// Returns an iterator over the stack (from bottom to top).
     pub fn iter(&self) -> Iter<'_> {
         let top = self.top();
-        Iter { state: self, n: 1, top }
+        Iter {
+            state: self,
+            n: 1,
+            top,
+        }
     }
 
     /// Creates an iterator which dumps the values on a Lua stack from bottom to top.
@@ -442,54 +488,19 @@ impl State {
     }
 }
 
-/// Creates a new `NonNull<ffi::lua_State>` with the given memory allocation `limit`.
-/// 
-/// # Panics
-///
-/// Panics when the ptr is non-null.
-fn new_state_unchecked(limit: usize) -> NonNull<ffi::lua_State> {
-    // initialize Lua user data
-    let ud = Box::into_raw(box alloc::MemoryInfo::new(limit));
-
-    // initialize raw Lua state
-    let ptr = unsafe { ffi::lua_newstate(alloc::alloc, ud as _) };
-    debug!("{:p} new state", ptr);
-
-    // panic when pointer is null, that is when not enough memory could be
-    // allocated for the Lua state.
-    if ptr.is_null() {
-        panic!("failed to allocate enough memory for a Lua state");
-    }
-
-    // SAFETY: This unsafety is ok becuase the pointer is already checked and
-    // is non-null.
-    unsafe { NonNull::new_unchecked(ptr) }
-}
-
 impl Default for State {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Clone for State {
-    fn clone(&self) -> Self {
-        debug!("{:p} clone state (rc = {})", self.inner().ptr, self.inner().count());
-        self.inner().inc_count();
-        Self { ptr: self.ptr }
-    }
-}
-
 impl Drop for State {
     fn drop(&mut self) {
-        debug!("{:p} drop state (rc = {})", self.inner().ptr, self.inner().count());
-        self.inner().dec_count();
-        if self.inner().count() == 0 {
-            unsafe {
-                // SAFETY: This safety is ok becuase while this `State` is alive
-                // we're guaranteed that the inner pointer was not freed before.
-                Box::from_raw(self.ptr);
-            }
+        debug!("{:p} drop state", self.ptr);
+        unsafe {
+            // SAFETY: This unsafety is ok becuase while this `State` is alive
+            // we're guaranteed that the inner pointer was not freed before.
+            ffi::lua_close(self.as_ptr())
         }
     }
 }
@@ -560,8 +571,6 @@ impl<'a> fmt::Display for Info<'a> {
 impl<'a> Iterator for Dump<'a> {
     type Item = Info<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(idx, _, state)| {
-            state.info(idx)
-        })
+        self.iter.next().map(|(idx, _, state)| state.info(idx))
     }
 }
