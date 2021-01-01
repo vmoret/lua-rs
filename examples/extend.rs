@@ -61,8 +61,7 @@ mod config {
     fn get_color_field(state: &mut lua::State, key: &str) -> lua::Result<u8> {
         let mut state = lua::state::StackGuard::new(state);
 
-        state.push_string(key)?; // push the key
-        state.get_table(-2); // get background[key]
+        state.get_field(-1, key)?; // get background[key]
         let n: f32 = state.to_number(-1).ok_or_else(|| {
             lua::Error::new(
                 lua::ErrorKind::InvalidInput,

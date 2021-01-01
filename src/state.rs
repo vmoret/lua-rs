@@ -528,6 +528,17 @@ impl State {
         unsafe { ffi::lua_gettable(self.as_ptr(), index) }
     }
 
+    /// Pushes onto the stack the value `t[k]`, where `t` is the value at the given `index`. As in
+    /// Lua, this function may trigger a metamethod for the "index" event (see [`§2.4`]).
+    /// 
+    /// Returns the type of the pushed value.
+    ///
+    /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
+    pub fn get_field<T: Into<Vec<u8>>>(&mut self, index: i32, key: T) -> Result<i32> {
+        let key = CString::new(key)?;
+        Ok(unsafe { ffi::lua_getfield(self.as_ptr(), index, key.as_ptr()) })
+    }
+
     /// Does the equivalent to `t[k] = v`, where `t` is the value at the given index, `v` is the
     /// value on the top of the stack, and `k` is the value just below the top.
     /// 
@@ -537,6 +548,18 @@ impl State {
     /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
     pub fn set_table(&mut self, index: i32) {
         unsafe { ffi::lua_settable(self.as_ptr(), index) }
+    }
+
+    /// Does the equivalent to `t[k] = v`, where `t` is the value at the given `index` and `v` is
+    /// the value on the top of the stack.
+    /// 
+    /// This function pops the value from the stack. As in Lua, this function may trigger a
+    /// metamethod for the "newindex" event (see [`§2.4`]).
+    ///
+    /// [`§2.4`]: https://www.lua.org/manual/5.4/manual.html#2.4
+    pub fn set_field<T: Into<Vec<u8>>>(&mut self, index: i32, key: T) -> Result<()> {
+        let key = CString::new(key)?;
+        Ok(unsafe { ffi::lua_setfield(self.as_ptr(), index, key.as_ptr()) })
     }
 
     /// Creates a new empty table and pushes it onto the stack.
